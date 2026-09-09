@@ -3,6 +3,11 @@ from django.db import models
 
 
 class Sucursal(models.Model):
+    negocio = models.ForeignKey('catalogo.Negocio', null=True, on_delete=models.PROTECT, related_name='sucursales')
+    slug_publico = models.SlugField(max_length=160, unique=True, null=True, blank=True)
+    zona_horaria = models.CharField(max_length=80, default='America/La_Paz')
+    latitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     nombre = models.CharField(max_length=120, unique=True)
     direccion = models.CharField(max_length=255, blank=True)
     telefono = models.CharField(max_length=40, blank=True)
@@ -55,9 +60,13 @@ class User(AbstractUser):
         ordering = ['-id']
 
     def save(self, *args, **kwargs):
+        previous = type(self).objects.filter(pk=self.pk).values('password').first() if self.pk else None
         if not self.username:
             self.username = self.correo
         super().save(*args, **kwargs)
+        if previous and (previous['password'] != self.password or not self.estado or not self.is_active):
+            from rest_framework.authtoken.models import Token
+            Token.objects.filter(user=self).delete()
 
     def __str__(self):
         return self.correo
