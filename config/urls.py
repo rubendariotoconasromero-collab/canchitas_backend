@@ -22,6 +22,7 @@ from catalogo.branding import branding
 
 urlpatterns = [
     path('api/publico/marca/', branding, name='public-branding'),
+    path('api/publico/marca', branding, name='public-branding-noslash'),
     path('api/catalogo/', include('catalogo.urls')),
     path('api/', include('users.urls')),
     path('admin/', admin.site.urls),

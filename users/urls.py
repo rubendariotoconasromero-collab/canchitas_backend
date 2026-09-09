@@ -22,8 +22,12 @@ router.register('sucursales', SucursalViewSet, basename='sucursales')
 
 urlpatterns = [
     path('health/', health),
+    path('health', health),
     path('login/', LoginView.as_view()),
+    path('login', LoginView.as_view()),
     path('logout/', LogoutView.as_view()),
+    path('logout', LogoutView.as_view()),
     path('me/', MeView.as_view()),
+    path('me', MeView.as_view()),
     path('', include(router.urls)),
 ]

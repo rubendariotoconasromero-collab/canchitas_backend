@@ -55,6 +55,9 @@ class CatalogTests(TestCase):
         return self.post('tarifas',data)
 
     def test_default_values_and_bob_only(self):
+        response = self.client.get(f'/api/catalogo/canchas/{self.court.pk}/')
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('anticipacion_minutos', response.data)
         self.assertEqual(self.court.duracion_minima_minutos,60)
         self.assertEqual(self.patch('negocios',self.business.pk,{'moneda':'USD'}).status_code,400)
         response = self.post('politicas',{'sucursal':self.branch.pk})

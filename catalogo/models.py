@@ -49,7 +49,6 @@ class Cancha(Timestamped):
     techada = models.BooleanField(default=False)
     iluminacion = models.BooleanField(default=False)
     capacidad_personas = models.PositiveIntegerField(default=10, validators=[MinValueValidator(1)])
-    anticipacion_minutos = models.PositiveIntegerField(default=0)
     duracion_minima_minutos = models.PositiveIntegerField(default=60, validators=[MinValueValidator(1)])
     activa = models.BooleanField(default=True)
     publicada = models.BooleanField(default=False)
