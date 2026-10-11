@@ -9,7 +9,7 @@ from threading import Barrier
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 from users.models import User, Sucursal, Rol, Permiso, RolPermiso, RolPermisoUsuario
-from .models import Negocio, Deporte, Cancha, CanchaDeporte, PoliticaReserva, HorarioCancha, TarifaCancha
+from .models import Negocio, Deporte, Cancha, CanchaDeporte, PoliticaReserva, HorarioCancha, TarifaCancha, FotoCancha
 
 
 class CatalogTests(TestCase):
@@ -47,6 +47,43 @@ class CatalogTests(TestCase):
         data.update(changes)
         return self.post('horarios',data)
 
+    def test_photo_order_append_move_and_boundaries(self):
+        photos = [self.post('fotos', {'cancha': self.court.pk, 'archivo': self.photo(),
+                  'texto_alternativo': str(i), 'orden': 99}, 'multipart') for i in range(3)]
+        for response in photos:
+            self.assertEqual(response.status_code, 201, response.data)
+        ids = [response.data['id'] for response in photos]
+        self.assertEqual([response.data['orden'] for response in photos], [0, 1, 2])
+        url = f'/api/catalogo/fotos/{ids[2]}/mover/'
+        response = self.client.post(url, {'direccion': 'subir'}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual([row['id'] for row in response.data], [ids[0], ids[2], ids[1]])
+        listing = self.client.get(f'/api/catalogo/fotos/?cancha={self.court.pk}')
+        self.assertEqual([row['id'] for row in listing.data], [ids[0], ids[2], ids[1]])
+        response = self.client.post(url, {'direccion': 'bajar'}, format='json')
+        self.assertEqual([row['id'] for row in response.data], ids)
+        response = self.client.post(url, {'direccion': 'bajar'}, format='json')
+        self.assertEqual([row['id'] for row in response.data], ids)
+        self.assertEqual(self.client.post(url, {'direccion': 'otro'}, format='json').status_code, 400)
+        self.patch('fotos', ids[0], {'orden': 88})
+        self.assertEqual(FotoCancha.objects.get(pk=ids[0]).orden, 0)
+
+    def test_photo_move_normalizes_old_orders_and_isolates_courts(self):
+        photos = [FotoCancha.objects.create(cancha=self.court, archivo='foto.png', orden=0)
+                  for _ in range(3)]
+        other_court = Cancha.objects.create(sucursal=self.other, codigo='B', nombre='Otra')
+        other_photo = FotoCancha.objects.create(cancha=other_court, archivo='otra.png', orden=7)
+        response = self.client.post(f'/api/catalogo/fotos/{photos[1].pk}/mover/',
+                                    {'direccion': 'subir'}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row['id'] for row in response.data], [photos[1].pk, photos[0].pk, photos[2].pk])
+        self.assertEqual([row['orden'] for row in response.data], [0, 1, 2])
+        other_photo.refresh_from_db()
+        self.assertEqual(other_photo.orden, 7)
+        self.client.force_authenticate(None)
+        self.assertIn(self.client.post(f'/api/catalogo/fotos/{photos[0].pk}/mover/',
+                      {'direccion': 'bajar'}, format='json').status_code, (401, 403))
+
     def rate(self, **changes):
         data = {'cancha_deporte':self.link.pk,'nombre':'Noche','dia_semana':1,
                 'hora_desde':'18:00','hora_hasta':'22:00','cruza_medianoche':False,
@@ -63,7 +100,9 @@ class CatalogTests(TestCase):
         response = self.post('politicas',{'sucursal':self.branch.pk})
         self.assertEqual(response.status_code,201,response.data)
         self.assertEqual(response.data['horas_limite_cancelacion'],5)
-        self.assertIsNone(response.data['porcentaje_anticipo'])
+        self.assertNotIn('porcentaje_anticipo', response.data)
+        self.assertIs(response.data['pago_total_obligatorio'], True)
+        self.assertIs(response.data['permite_reembolso'], False)
         self.assertEqual(self.patch('canchas',self.court.pk,{'duracion_minima_minutos':90}).status_code,200)
         self.assertEqual(self.patch('canchas',self.court.pk,{'duracion_minima_minutos':0}).status_code,400)
 
@@ -74,6 +113,57 @@ class CatalogTests(TestCase):
         self.assertEqual(self.schedule(dia_semana=4,apertura='23:00',cierre='01:00').status_code,400)
         self.assertEqual(self.schedule(dia_semana=8).status_code,400)
         self.assertEqual(self.schedule(dia_semana=5,apertura='18:00',cierre='20:00',cruza_medianoche=True).status_code,400)
+
+    def test_court_dimensions_optional_and_area_calculated(self):
+        response = self.client.get(f'/api/catalogo/canchas/{self.court.pk}/')
+        self.assertIsNone(response.data['ancho_metros'])
+        self.assertIsNone(response.data['largo_metros'])
+        self.assertIsNone(response.data['area_m2'])
+        response = self.patch('canchas', self.court.pk, {'ancho_metros': '20.50', 'largo_metros': '40.00'})
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['area_m2'], '820.0000')
+        self.assertEqual(response.data['superficie'], 'Cesped')
+        listing = self.client.get('/api/catalogo/canchas/')
+        rows = listing.data if isinstance(listing.data, list) else listing.data['results']
+        self.assertEqual(next(row for row in rows if row['id'] == self.court.pk)['area_m2'], '820.0000')
+
+    def test_court_dimensions_partial_updates_and_clear(self):
+        self.assertEqual(self.patch('canchas', self.court.pk, {'ancho_metros': '20'}).status_code, 400)
+        self.assertEqual(self.patch('canchas', self.court.pk, {'ancho_metros': '20', 'largo_metros': '40'}).status_code, 200)
+        response = self.patch('canchas', self.court.pk, {'largo_metros': '30'})
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['area_m2'], '600.0000')
+        self.assertEqual(self.patch('canchas', self.court.pk, {'ancho_metros': None}).status_code, 400)
+        response = self.patch('canchas', self.court.pk, {'ancho_metros': None, 'largo_metros': None})
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIsNone(response.data['area_m2'])
+
+    def test_court_dimensions_reject_invalid_numbers_and_area_input(self):
+        for value in ['0', '-1', '1.234', '100000', 'NaN', 'Infinity', 'texto']:
+            with self.subTest(value=value):
+                response = self.patch('canchas', self.court.pk, {'ancho_metros': value, 'largo_metros': '40'})
+                self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(self.patch('canchas', self.court.pk, {'area_m2': '800'}).status_code, 400)
+        response = self.patch('canchas', self.court.pk, {'ancho_metros': '0.01', 'largo_metros': '0.01'})
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['area_m2'], '0.0001')
+
+    def test_court_dimensions_create_and_full_update(self):
+        base = {'sucursal': self.branch.pk, 'codigo': 'D', 'nombre': 'Dimensiones'}
+        self.assertEqual(self.post('canchas', {**base, 'largo_metros': '40'}).status_code, 400)
+        response = self.post('canchas', {**base, 'ancho_metros': '20', 'largo_metros': '40'})
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['area_m2'], '800.0000')
+        response = self.client.put(f"/api/catalogo/canchas/{response.data['id']}/",
+                                   {**base, 'ancho_metros': '10.25', 'largo_metros': '30.50'}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['area_m2'], '312.6250')
+
+    def test_court_dimensions_database_constraint(self):
+        from django.db import IntegrityError, transaction
+        for width, length in [(20, None), (None, 40), (0, 40), (-1, 40)]:
+            with self.subTest(width=width, length=length), self.assertRaises(IntegrityError), transaction.atomic():
+                Cancha.objects.filter(pk=self.court.pk).update(ancho_metros=width, largo_metros=length)
 
     def test_week_boundary_and_inactive_schedule(self):
         self.assertEqual(self.schedule(dia_semana=7,apertura='23:00',cierre='02:00',cruza_medianoche=True).status_code,201)
@@ -109,6 +199,40 @@ class CatalogTests(TestCase):
         self.assertEqual(PoliticaReserva.objects.filter(sucursal=self.branch).count(),1)
         self.assertEqual(self.client.delete(f'/api/catalogo/politicas/{old.pk}/').status_code,405)
         self.assertEqual(self.post('politicas',{'sucursal':self.branch.pk,'porcentaje_anticipo':101}).status_code,400)
+
+    def test_retired_advance_and_fixed_rules_are_rejected_on_all_writes(self):
+        policy = PoliticaReserva.objects.create(sucursal=self.branch, version=1, horas_limite_cancelacion=9)
+        for field, values in {'porcentaje_anticipo': [None, 0, 50, 100, 101],
+                              'pago_total_obligatorio': [False, True],
+                              'permite_reembolso': [True, False]}.items():
+            for value in values:
+                for method in ('post', 'put', 'patch'):
+                    with self.subTest(field=field, value=value, method=method):
+                        url = '/api/catalogo/politicas/' + ('' if method == 'post' else f'{policy.pk}/')
+                        response = getattr(self.client, method)(url, {'sucursal': self.branch.pk,
+                                                                     field: value}, format='json')
+                        self.assertEqual(response.status_code, 400)
+                        self.assertIn(field, response.data)
+        policy.refresh_from_db()
+        self.assertEqual(policy.horas_limite_cancelacion, 9)
+        self.assertEqual(PoliticaReserva.objects.filter(sucursal=self.branch).count(), 1)
+
+    def test_policy_contract_and_editable_settings(self):
+        response = self.post('politicas', {'sucursal': self.branch.pk, 'minutos_retencion': 15,
+                                          'condiciones': 'Contacto en recepcion'})
+        pk = response.data['id']
+        response = self.client.put(f'/api/catalogo/politicas/{pk}/',
+                                   {'sucursal': self.branch.pk, 'horas_limite_cancelacion': 12,
+                                    'minutos_retencion': 20, 'condiciones': 'Nueva nota'}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        for row in [response.data, self.client.get(f'/api/catalogo/politicas/{pk}/').data,
+                    self.client.get('/api/catalogo/politicas/').data[0]]:
+            self.assertNotIn('porcentaje_anticipo', row)
+            self.assertIs(row['pago_total_obligatorio'], True)
+            self.assertIs(row['permite_reembolso'], False)
+            self.assertEqual(row['horas_limite_cancelacion'], 12)
+            self.assertEqual(row['minutos_retencion'], 20)
+        self.assertEqual(self.patch('politicas', pk, {'horas_limite_cancelacion': -1}).status_code, 400)
 
     def test_publication_requires_complete_configuration(self):
         self.assertEqual(self.patch('canchas',self.court.pk,{'publicada':True}).status_code,400)

@@ -46,6 +46,10 @@ class Cancha(Timestamped):
     nombre = models.CharField(max_length=120)
     descripcion_publica = models.TextField(blank=True)
     superficie = models.CharField(max_length=100, blank=True)
+    ancho_metros = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True,
+                                      validators=[MinValueValidator(Decimal('0.01'))])
+    largo_metros = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True,
+                                      validators=[MinValueValidator(Decimal('0.01'))])
     techada = models.BooleanField(default=False)
     iluminacion = models.BooleanField(default=False)
     capacidad_personas = models.PositiveIntegerField(default=10, validators=[MinValueValidator(1)])
@@ -56,7 +60,18 @@ class Cancha(Timestamped):
     class Meta:
         ordering = ['sucursal_id', 'nombre']
         constraints = [models.UniqueConstraint(fields=['sucursal', 'codigo'], name='cancha_codigo_sucursal'),
-                       models.CheckConstraint(condition=models.Q(duracion_minima_minutos__gt=0), name='cancha_minimo_positivo')]
+                       models.CheckConstraint(condition=models.Q(duracion_minima_minutos__gt=0), name='cancha_minimo_positivo'),
+                       models.CheckConstraint(
+                           condition=(models.Q(ancho_metros__isnull=True, largo_metros__isnull=True) |
+                                      models.Q(ancho_metros__isnull=False, largo_metros__isnull=False,
+                                               ancho_metros__gt=0, largo_metros__gt=0)),
+                           name='cancha_dimensiones_validas')]
+
+    @property
+    def area_m2(self):
+        if self.ancho_metros is None or self.largo_metros is None:
+            return None
+        return self.ancho_metros * self.largo_metros
 
 
 class CanchaDeporte(Timestamped):
@@ -123,17 +138,24 @@ class TarifaCancha(Timestamped):
 
 
 class PoliticaReserva(Timestamped):
+    pago_total_obligatorio = True
+    permite_reembolso = False
     sucursal = models.ForeignKey('users.Sucursal', on_delete=models.PROTECT, related_name='politicas')
     version = models.PositiveIntegerField()
     horas_limite_cancelacion = models.PositiveIntegerField(default=5)
-    porcentaje_anticipo = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True,
-                                             validators=[MinValueValidator(0), MaxValueValidator(100)])
     minutos_retencion = models.PositiveIntegerField(null=True, blank=True, validators=[MinValueValidator(1)])
     condiciones = models.TextField(blank=True)
     activa = models.BooleanField(default=True)
 
     class Meta:
         ordering = ['-version']
-        constraints = [models.UniqueConstraint(fields=['sucursal', 'version'], name='politica_version_unica'),
-                       models.CheckConstraint(condition=models.Q(porcentaje_anticipo__isnull=True) | models.Q(porcentaje_anticipo__gt=0, porcentaje_anticipo__lte=100),
-                                              name='politica_anticipo_valido')]
+        constraints = [models.UniqueConstraint(fields=['sucursal', 'version'], name='politica_version_unica')]
+
+
+class RespaldoAnticipo(models.Model):
+    """Archivo de la configuracion retirada; no participa en reglas ni en la API."""
+
+    politica_id = models.PositiveBigIntegerField(primary_key=True, editable=False)
+    sucursal_id = models.PositiveBigIntegerField(editable=False)
+    version = models.PositiveIntegerField(editable=False)
+    porcentaje_anticipo = models.DecimalField(max_digits=5, decimal_places=2, null=True, editable=False)

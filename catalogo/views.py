@@ -4,6 +4,7 @@ from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from users.access import ActionPermission, is_global, effective_permissions
 from users.models import Sucursal
 from .models import Negocio, Deporte, Cancha, CanchaDeporte, FotoCancha, HorarioCancha, TarifaCancha, PoliticaReserva
@@ -159,6 +160,43 @@ class FotoViewSet(CatalogViewSet):
     serializer_class = FotoSerializer
     branch_lookup = 'cancha__sucursal_id'
     state_field = 'publicada'
+
+    @property
+    def action_permissions(self):
+        return {**super().action_permissions, 'mover': ('canchas.editar',)}
+
+    def get_queryset(self):
+        return super().get_queryset().order_by('orden', 'pk')
+
+    def save_record(self, serializer):
+        if not serializer.instance:
+            self.validate_scope(serializer)
+            court = serializer.validated_data['cancha']
+            last = FotoCancha.objects.filter(cancha=court).aggregate(n=Max('orden'))['n']
+            serializer.validated_data['orden'] = 0 if last is None else last + 1
+        return super().save_record(serializer)
+
+    @action(detail=True, methods=['post'])
+    @transaction.atomic
+    def mover(self, request, *args, **kwargs):
+        direction = request.data.get('direccion')
+        if direction not in ('subir', 'bajar'):
+            raise ValidationError({'direccion': 'Usa subir o bajar.'})
+        self.lock_scope()
+        photo = self.get_object()
+        if not photo.cancha.sucursal.estado:
+            raise ValidationError('La sucursal esta inactiva.')
+        photos = list(FotoCancha.objects.select_for_update().filter(cancha_id=photo.cancha_id)
+                      .order_by('orden', 'pk'))
+        index = next(i for i, item in enumerate(photos) if item.pk == photo.pk)
+        target = index + (-1 if direction == 'subir' else 1)
+        if 0 <= target < len(photos):
+            photos[index], photos[target] = photos[target], photos[index]
+        # Normalize older duplicate positions while holding the branch writer lock.
+        for position, item in enumerate(photos):
+            item.orden = position
+        FotoCancha.objects.bulk_update(photos, ['orden'])
+        return Response(self.get_serializer(photos, many=True).data)
 
 
 class HorarioViewSet(CatalogViewSet):

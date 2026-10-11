@@ -52,6 +52,12 @@ class DeporteSerializer(serializers.ModelSerializer):
 class CanchaSerializer(serializers.ModelSerializer):
     sucursal_nombre = serializers.CharField(source='sucursal.nombre', read_only=True)
     pendientes_publicacion = serializers.SerializerMethodField()
+    area_m2 = serializers.DecimalField(max_digits=14, decimal_places=4, read_only=True, allow_null=True)
+
+    def to_internal_value(self, data):
+        if 'area_m2' in data:
+            raise serializers.ValidationError({'area_m2': 'El area se calcula a partir del ancho y largo.'})
+        return super().to_internal_value(data)
 
     class Meta:
         model = Cancha
@@ -61,6 +67,11 @@ class CanchaSerializer(serializers.ModelSerializer):
         return publication_errors(obj)
 
     def validate(self, attrs):
+        width = attrs.get('ancho_metros', self.instance.ancho_metros if self.instance else None)
+        length = attrs.get('largo_metros', self.instance.largo_metros if self.instance else None)
+        if (width is None) != (length is None):
+            missing = 'ancho_metros' if width is None else 'largo_metros'
+            raise serializers.ValidationError({missing: 'Registra ancho y largo juntos, o deja ambos vacios.'})
         if self.instance and 'sucursal' in attrs and attrs['sucursal'].pk != self.instance.sucursal_id:
             raise serializers.ValidationError('No puedes trasladar una cancha a otra sucursal.')
         if attrs.get('publicada') and not self.instance:
@@ -81,6 +92,7 @@ class FotoSerializer(serializers.ModelSerializer):
     class Meta:
         model = FotoCancha
         fields = '__all__'
+        read_only_fields = ['orden']
 
     def validate_archivo(self, value):
         if value.size > 5 * 1024 * 1024:
@@ -134,6 +146,20 @@ class TarifaSerializer(IntervalSerializer):
 
 
 class PoliticaSerializer(serializers.ModelSerializer):
+    pago_total_obligatorio = serializers.BooleanField(read_only=True)
+    permite_reembolso = serializers.BooleanField(read_only=True)
+
+    def to_internal_value(self, data):
+        errors = {}
+        if 'porcentaje_anticipo' in data:
+            errors['porcentaje_anticipo'] = 'Este campo fue retirado. La reserva requiere pago total.'
+        for field in ('pago_total_obligatorio', 'permite_reembolso'):
+            if field in data:
+                errors[field] = 'Esta regla es obligatoria y no se puede configurar.'
+        if errors:
+            raise serializers.ValidationError(errors)
+        return super().to_internal_value(data)
+
     def validate(self, attrs):
         if self.instance and 'sucursal' not in attrs:
             attrs['sucursal'] = self.instance.sucursal
@@ -144,8 +170,3 @@ class PoliticaSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['version', 'activa']
         validators = []
-
-    def validate_porcentaje_anticipo(self, value):
-        if value is not None and value <= 0:
-            raise serializers.ValidationError('El anticipo debe ser mayor que cero o quedar pendiente.')
-        return value

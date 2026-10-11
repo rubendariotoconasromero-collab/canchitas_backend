@@ -19,11 +19,15 @@ from django.urls import include, path
 from django.conf import settings
 from django.conf.urls.static import static
 from catalogo.branding import branding
+from users.dashboard import dashboard_summary
 
 urlpatterns = [
+    path('api/dashboard/resumen/', dashboard_summary, name='dashboard-summary'),
     path('api/publico/marca/', branding, name='public-branding'),
     path('api/publico/marca', branding, name='public-branding-noslash'),
     path('api/catalogo/', include('catalogo.urls')),
+    path('api/reservas/', include('reservas.urls')),
+    path('api/caja/', include('caja.urls')),
     path('api/', include('users.urls')),
     path('admin/', admin.site.urls),
 ]

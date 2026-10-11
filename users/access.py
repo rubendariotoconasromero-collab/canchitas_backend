@@ -9,6 +9,7 @@ PERMISSIONS = {
     'sucursales.ver', 'reportes.ver', 'alcance.global',
     'reservas.ver', 'reservas.crear', 'reservas.alquilar_inmediato', 'caja.cobrar',
 }
+PERMISSIONS.update({'caja.ver', 'caja.abrir', 'caja.cerrar', 'caja.movimientos','caja.configurar'})
 LEGACY_READ = {
     'acceso_dashboard': 'dashboard.ver', 'acceso_usuarios': 'usuarios.ver',
     'acceso_roles': 'roles.ver', 'acceso_permisos': 'permisos.ver',
@@ -18,6 +19,9 @@ LEGACY_READ = {
 PERMISSIONS.update(f'{resource}.{action}' for resource in
                    ('negocio', 'sucursales', 'deportes', 'canchas', 'horarios', 'tarifas', 'politicas')
                    for action in ('ver', 'crear', 'editar', 'desactivar'))
+PERMISSIONS.update({'clientes.ver', 'clientes.crear', 'clientes.editar', 'clientes.desactivar',
+                    'reservas.reprogramar', 'reservas.cancelar', 'reservas.confirmar',
+                    'reservas.iniciar', 'reservas.finalizar', 'bloqueos.ver', 'bloqueos.crear', 'bloqueos.liberar'})
 
 
 def effective_permissions(user):
