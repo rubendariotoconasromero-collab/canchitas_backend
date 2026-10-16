@@ -158,7 +158,7 @@ class CashTests(CashFixtures, TestCase):
         self.assertNotIn(foreign.pk,[row['id'] for row in rows])
         self.assertEqual(self.client.get(f'/api/caja/cajas/{foreign.pk}/').status_code,404)
         self.assertEqual(self.client.post('/api/caja/cajas/',{'nombre':'Nueva','sucursal':self.branch.pk},format='json').status_code,403)
-        self.assertEqual(self.client.post(f'/api/caja/sesiones/{self.session.pk}/cerrar/',{'efectivo_contado':'50'},format='json').status_code,403)
+        self.assertEqual(self.client.post(f'/api/caja/sesiones/{self.session.pk}/cerrar/',{'efectivo_contado':'50'},format='json').status_code,404)
         data = self.payment()
         data = {key:str(value) if isinstance(value,(Decimal,type(data['clave']))) else value for key,value in data.items()}
         self.assertEqual(self.client.post('/api/caja/recibos/',data,format='json').status_code,201)

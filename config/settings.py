@@ -48,6 +48,8 @@ INSTALLED_APPS = [
     'catalogo',
     'reservas',
     'caja',
+    'auditoria',
+    'reportes',
 ]
 
 MIDDLEWARE = [
@@ -154,3 +156,13 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
 }
+
+REPORT_MAX_DAYS = int(os.getenv('REPORT_MAX_DAYS', '366'))
+REPORT_MAX_ROWS = int(os.getenv('REPORT_MAX_ROWS', '10000'))
+
+PUBLIC_HISTORY_DAYS = max(1, int(os.getenv('PUBLIC_HISTORY_DAYS', '90')))
+PUBLIC_HISTORY_COOKIE = 'srm_historial'
+PUBLIC_HISTORY_COOKIE_SECURE = os.getenv('PUBLIC_HISTORY_COOKIE_SECURE', str(not DEBUG)) == 'True'
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', ','.join(CORS_ALLOWED_ORIGINS)).split(',')
+CSRF_COOKIE_SECURE = PUBLIC_HISTORY_COOKIE_SECURE

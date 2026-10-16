@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from .access import ActionPermission, assigned_permissions, effective_permissions, is_global
+from auditoria import services as audit
 
 from .models import Permiso, Rol, RolPermiso, RolPermisoUsuario, Sucursal, User
 from .serializers import (
@@ -97,10 +98,12 @@ class UserViewSet(viewsets.ModelViewSet):
         self.protect_target(serializer.instance, serializer.validated_data.get('estado'))
         serializer.save()
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
+        audit.changed(request.user, serializer.instance, {}, 'crear')
         return Response({
             'data': serializer.data,
             'message': 'Usuario creado correctamente.',
@@ -113,9 +116,14 @@ class UserViewSet(viewsets.ModelViewSet):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
         instance = User.objects.select_for_update().get(pk=instance.pk)
+        before = audit.snapshot(instance)
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+        audit.changed(request.user, serializer.instance, before, force=True)
+        if serializer.validated_data.get('password'):
+            audit.record(request.user, 'User', serializer.instance.pk, 'actualizar_credencial',
+                         serializer.instance.sucursal_id, after={'credencial_actualizada': True})
         return Response({'data': serializer.data, 'message': 'Usuario actualizado correctamente.'})
 
     @transaction.atomic
@@ -124,9 +132,11 @@ class UserViewSet(viewsets.ModelViewSet):
         user = self.get_object()
         user = User.objects.select_for_update().get(pk=user.pk)
         self.protect_target(user, not user.estado)
+        before = audit.snapshot(user)
         user.estado = not user.estado
         user.is_active = user.estado
         user.save(update_fields=['estado', 'is_active'])
+        audit.changed(request.user, user, before, 'cambiar_estado')
         Token.objects.filter(user=user).delete()
         estado = 'activado' if user.estado else 'desactivado'
         return Response({'data': UserSerializer(user).data, 'message': f'Usuario {estado} correctamente.'})
@@ -143,6 +153,7 @@ class UserViewSet(viewsets.ModelViewSet):
         user = self.get_object()
         user = User.objects.select_for_update().get(pk=user.pk)
         self.protect_target(user)
+        before = audit.snapshot(user)
         if user.pk == request.user.pk:
             raise PermissionDenied('No puedes modificar tus propios accesos.')
         serializer = SyncAsignacionesSerializer(data=request.data)
@@ -168,6 +179,7 @@ class UserViewSet(viewsets.ModelViewSet):
             RolPermisoUsuario(user=user, rol_permiso_id=rol_permiso_id)
             for rol_permiso_id in ids - current
         ])
+        audit.changed(request.user, user, before, 'asignar_accesos')
         return Response({'message': 'Asignaciones sincronizadas correctamente.'})
 
 
@@ -193,27 +205,37 @@ class RolViewSet(viewsets.ModelViewSet):
     queryset = Rol.objects.prefetch_related('roles_permisos__permiso').all()
     serializer_class = RolSerializer
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
+        audit.changed(request.user, serializer.instance, {}, 'crear')
         return Response({
             'data': serializer.data,
             'message': 'Rol creado correctamente.',
         }, status=status.HTTP_201_CREATED)
 
+    @transaction.atomic
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
+        instance = Rol.objects.select_for_update().get(pk=instance.pk)
+        before = audit.snapshot(instance)
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+        audit.changed(request.user, serializer.instance, before, force=True)
         return Response({'data': serializer.data, 'message': 'Rol actualizado correctamente.'})
 
+    @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         rol = self.get_object()
+        rol = Rol.objects.select_for_update().get(pk=rol.pk)
+        before = audit.snapshot(rol)
         rol.estado = not rol.estado
         rol.save(update_fields=['estado'])
+        audit.changed(request.user, rol, before, 'cambiar_estado')
         estado = 'activado' if rol.estado else 'desactivado'
         return Response({'data': RolSerializer(rol).data, 'message': f'Rol {estado} correctamente.'})
 
@@ -228,6 +250,7 @@ class RolViewSet(viewsets.ModelViewSet):
     def sync_permisos(self, request, pk=None):
         rol = self.get_object()
         rol = Rol.objects.select_for_update().get(pk=rol.pk)
+        before = audit.snapshot(rol)
         serializer = SyncRolPermisosSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         ids = set(serializer.validated_data['permiso_ids'])
@@ -237,6 +260,7 @@ class RolViewSet(viewsets.ModelViewSet):
             RolPermiso(rol=rol, permiso_id=permiso_id)
             for permiso_id in ids - current
         ])
+        audit.changed(request.user, rol, before, 'asignar_permisos')
         return Response({'message': 'Permisos del rol sincronizados correctamente.'})
 
 
@@ -261,27 +285,37 @@ class PermisoViewSet(viewsets.ModelViewSet):
     queryset = Permiso.objects.all()
     serializer_class = PermisoSerializer
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
+        audit.changed(request.user, serializer.instance, {}, 'crear')
         return Response({
             'data': serializer.data,
             'message': 'Permiso creado correctamente.',
         }, status=status.HTTP_201_CREATED)
 
+    @transaction.atomic
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
+        instance = Permiso.objects.select_for_update().get(pk=instance.pk)
+        before = audit.snapshot(instance)
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+        audit.changed(request.user, serializer.instance, before, force=True)
         return Response({'data': serializer.data, 'message': 'Permiso actualizado correctamente.'})
 
+    @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         permiso = self.get_object()
+        permiso = Permiso.objects.select_for_update().get(pk=permiso.pk)
+        before = audit.snapshot(permiso)
         permiso.estado = not permiso.estado
         permiso.save(update_fields=['estado'])
+        audit.changed(request.user, permiso, before, 'cambiar_estado')
         estado = 'activado' if permiso.estado else 'desactivado'
         return Response({'data': PermisoSerializer(permiso).data, 'message': f'Permiso {estado} correctamente.'})
 

@@ -1,3 +1,6 @@
+import json
+import logging
+
 from django.db import transaction
 from django.db.models import Max
 from rest_framework import viewsets
@@ -12,6 +15,9 @@ from .serializers import (NegocioSerializer, SucursalCatalogoSerializer, Deporte
                           CanchaSerializer, CanchaDeporteSerializer, FotoSerializer,
                           HorarioSerializer, TarifaSerializer, PoliticaSerializer)
 from .rules import publication_errors
+from auditoria import services as audit
+
+logger = logging.getLogger(__name__)
 
 
 class CatalogViewSet(viewsets.ModelViewSet):
@@ -67,7 +73,10 @@ class CatalogViewSet(viewsets.ModelViewSet):
             qs = qs.filter(sucursal_id=self.request.user.sucursal_id)
         for court in qs:
             if publication_errors(court):
+                before = audit.snapshot(court)
                 Cancha.objects.filter(pk=court.pk).update(publicada=False)
+                court.publicada = False
+                audit.changed(self.request.user, court, before, 'despublicar')
 
     def save_record(self, serializer):
         self.validate_scope(serializer)
@@ -88,7 +97,8 @@ class CatalogViewSet(viewsets.ModelViewSet):
         self.lock_scope()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        self.save_record(serializer)
+        obj = self.save_record(serializer)
+        audit.changed(request.user, obj, {}, 'crear')
         return Response(serializer.data, status=201)
 
     @transaction.atomic
@@ -96,16 +106,20 @@ class CatalogViewSet(viewsets.ModelViewSet):
         self.lock_scope()
         serializer = self.get_serializer(self.get_object(), data=request.data, partial=kwargs.pop('partial', False))
         serializer.is_valid(raise_exception=True)
-        self.save_record(serializer)
+        before = audit.snapshot(serializer.instance)
+        obj = self.save_record(serializer)
+        audit.changed(request.user, obj, before)
         return Response(serializer.data)
 
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         self.lock_scope()
         obj = self.get_object()
+        before = audit.snapshot(obj)
         setattr(obj, self.state_field, False)
         obj.save(update_fields=[self.state_field, 'updated_at'])
         self.refresh_publication()
+        audit.changed(request.user, obj, before, 'desactivar')
         return Response(self.get_serializer(obj).data)
 
 
@@ -163,7 +177,8 @@ class FotoViewSet(CatalogViewSet):
 
     @property
     def action_permissions(self):
-        return {**super().action_permissions, 'mover': ('canchas.editar',)}
+        return {**super().action_permissions, 'mover': ('canchas.editar',),
+                'lote': ('canchas.crear',)}
 
     def get_queryset(self):
         return super().get_queryset().order_by('orden', 'pk')
@@ -175,6 +190,59 @@ class FotoViewSet(CatalogViewSet):
             last = FotoCancha.objects.filter(cancha=court).aggregate(n=Max('orden'))['n']
             serializer.validated_data['orden'] = 0 if last is None else last + 1
         return super().save_record(serializer)
+
+    @action(detail=False, methods=['post'])
+    def lote(self, request):
+        files = request.FILES.getlist('archivos')
+        if not 1 <= len(files) <= 10:
+            raise ValidationError({'archivos': 'Selecciona entre 1 y 10 fotografias.'})
+        try:
+            metadata = json.loads(request.data.get('fotografias', ''))
+        except (ValueError, TypeError):
+            raise ValidationError({'fotografias': 'Las descripciones deben ser una lista JSON.'})
+        if not isinstance(metadata, list) or len(metadata) != len(files) or any(
+                not isinstance(item, dict) for item in metadata):
+            raise ValidationError({'fotografias': 'Incluye una descripcion por cada archivo.'})
+
+        created = []
+        try:
+            with transaction.atomic():
+                self.lock_scope()
+                serializers, errors = [], {}
+                for index, (file, item) in enumerate(zip(files, metadata)):
+                    filename = file.name
+                    serializer = self.get_serializer(data={
+                        'cancha': request.data.get('cancha'), 'archivo': file,
+                        'texto_alternativo': item.get('texto_alternativo', ''),
+                        'publicada': request.data.get('publicada', True),
+                    })
+                    if serializer.is_valid():
+                        self.validate_scope(serializer)
+                        serializers.append(serializer)
+                    else:
+                        errors[str(index + 1)] = {'imagen': f'{index + 1}. {filename}', **serializer.errors}
+                if errors:
+                    raise ValidationError({'fotografias': errors})
+                court = serializers[0].validated_data['cancha']
+                last = FotoCancha.objects.filter(cancha=court).aggregate(n=Max('orden'))['n']
+                first = 0 if last is None else last + 1
+                for index, serializer in enumerate(serializers):
+                    photo = FotoCancha(**serializer.validated_data, orden=first + index)
+                    # Track before saving: a database failure can leave an uploaded file behind.
+                    created.append(photo)
+                    photo.save()
+                self.refresh_publication()
+                data = self.get_serializer(created, many=True).data
+            return Response(data, status=201)
+        except Exception:
+            # Database rollback does not roll back file storage.
+            for photo in created:
+                if photo.archivo and photo.archivo._committed:
+                    try:
+                        photo.archivo.delete(save=False)
+                    except Exception:
+                        logger.exception('No se pudo limpiar una fotografia del lote fallido.')
+            raise
 
     @action(detail=True, methods=['post'])
     @transaction.atomic

@@ -8,7 +8,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from catalogo.models import (Negocio, Cancha, Deporte, CanchaDeporte, FotoCancha,
                             HorarioCancha, TarifaCancha, PoliticaReserva, RespaldoAnticipo)
-from reservas.models import (Cliente, Reserva, DetalleReserva, HistorialReserva, BloqueoCancha, PagoReserva)
+from reservas.models import (Cliente, Reserva, DetalleReserva, HistorialReserva, BloqueoCancha, PagoReserva, SolicitudReserva)
 from caja.models import Caja, SesionCaja, MovimientoCaja, ReciboPago, MedioPago
 from users.models import Sucursal, User, Rol, Permiso, RolPermiso, RolPermisoUsuario
 from users.access import PERMISSIONS
@@ -30,6 +30,9 @@ ROLES = {
     'Cajero': ['dashboard.ver', 'canchas.ver', 'clientes.ver', 'reservas.ver',
                'caja.ver', 'caja.abrir', 'caja.cobrar', 'caja.movimientos', 'caja.cerrar'],
 }
+ROLES['Recepcion'] += ['solicitudes.ver', 'solicitudes.aceptar', 'solicitudes.rechazar']
+ROLES['Recepcion'] += ['reportes.ver', 'reportes.reservas', 'reportes.cobros', 'reportes.ocupacion', 'avisos.ver']
+ROLES['Cajero'] += ['reportes.ver', 'reportes.cobros', 'reportes.cierres', 'avisos.ver']
 ACCOUNTS = [
     ('recepcion@gmail.com', 'Recepcion', 'Recepcion'),
     ('cajero1@gmail.com', 'Cajero 1', 'Cajero'),
@@ -70,6 +73,8 @@ class Command(BaseCommand):
                 'nombre_comercial': 'Soccer Real Madrid', 'moneda': 'BOB',
                 'descripcion_publica': 'Alquiler de canchas de cesped sintetico para encuentros deportivos.'})
             self.record('negocios', created)
+            from catalogo.web_content import initialize_web
+            initialize_web(business)
             if business.nombre_comercial == 'Canchitas':
                 business.nombre_comercial = 'Soccer Real Madrid'
                 business.save(update_fields=['nombre_comercial', 'updated_at'])
@@ -123,7 +128,7 @@ class Command(BaseCommand):
                                 hora_desde=time(opening), hora_hasta=time(closing), vigente_desde=date(2026, 1, 1),
                                 precio_hora=Decimal(amount))
                             self.record('tarifas', True)
-            for code, name, cash in [('EFECTIVO', 'Efectivo', True), ('QR', 'QR', False), ('TRANSFERENCIA', 'Transferencia', False)]:
+            for code, name, cash in [('EFECTIVO', 'Efectivo', True), ('TRANSFERENCIA_QR', 'Transferencia QR', False)]:
                 _, created = MedioPago.objects.get_or_create(codigo=code, defaults={'nombre': name, 'efectivo': cash})
                 self.record('medios de pago (catalogo)', created)
             if options['dry_run']:
@@ -191,8 +196,9 @@ class Command(BaseCommand):
 
     def reset_data(self):
         from rest_framework.authtoken.models import Token
+        from auditoria.models import EventoAuditoria
         Caja.objects.update(sesion_actual=None)
-        for model in (ReciboPago, MovimientoCaja, SesionCaja, Caja, PagoReserva,
+        for model in (EventoAuditoria, SolicitudReserva, ReciboPago, MovimientoCaja, SesionCaja, Caja, PagoReserva,
                       HistorialReserva, DetalleReserva, BloqueoCancha, Reserva, Cliente,
                       FotoCancha, TarifaCancha, HorarioCancha, CanchaDeporte, Cancha,
                       Deporte, PoliticaReserva, RespaldoAnticipo):

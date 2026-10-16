@@ -1,6 +1,9 @@
 from datetime import date
+import json
 from io import BytesIO
+from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 from PIL import Image
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.db import close_old_connections, connection
@@ -40,6 +43,105 @@ class CatalogTests(TestCase):
         image = BytesIO()
         Image.new('RGB',(40,40),'green').save(image,format='PNG')
         return SimpleUploadedFile('cancha.png',image.getvalue(),content_type='image/png')
+
+    def photo_batch(self, files=None, descriptions=None, **changes):
+        files = [self.photo(), self.photo()] if files is None else files
+        descriptions = ['Vista frontal', 'Vista lateral'] if descriptions is None else descriptions
+        data = {'cancha': self.court.pk, 'archivos': files,
+                'fotografias': json.dumps([{'texto_alternativo': text} for text in descriptions])}
+        data.update(changes)
+        return self.post('fotos/lote', data, 'multipart')
+
+    def stored_photos(self):
+        return sorted(path for path in Path(self.temp.name).rglob('*') if path.is_file())
+
+    def test_photo_batch_appends_in_selection_order_and_can_be_edited_and_moved(self):
+        existing = self.post('fotos', {'cancha': self.court.pk, 'archivo': self.photo(),
+                             'texto_alternativo': 'Anterior'}, 'multipart')
+        response = self.photo_batch(publicada=False)
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual([item['orden'] for item in response.data], [1, 2])
+        self.assertEqual([item['texto_alternativo'] for item in response.data], ['Vista frontal', 'Vista lateral'])
+        self.assertTrue(all(not item['publicada'] for item in response.data))
+        self.assertEqual(len(self.stored_photos()), 3)
+        first = response.data[0]['id']
+        edited = self.patch('fotos', first, {'texto_alternativo': 'Entrada', 'publicada': True})
+        self.assertEqual(edited.status_code, 200, edited.data)
+        moved = self.post(f'fotos/{first}/mover', {'direccion': 'subir'})
+        self.assertEqual(moved.status_code, 200, moved.data)
+        self.assertEqual(moved.data[0]['id'], first)
+        self.assertEqual(moved.data[1]['id'], existing.data['id'])
+
+    def test_photo_batch_single_and_default_publication(self):
+        response = self.photo_batch(files=[self.photo()], descriptions=['Una fotografia'])
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(len(response.data), 1)
+        self.assertIs(response.data[0]['publicada'], True)
+        self.assertEqual(response.data[0]['orden'], 0)
+
+    def test_photo_batch_invalid_image_or_description_does_not_save_any(self):
+        invalid = SimpleUploadedFile('incorrecta.png', b'not an image', content_type='image/png')
+        response = self.photo_batch(files=[self.photo(), invalid])
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn('incorrecta.png', str(response.data))
+        self.assertEqual(FotoCancha.objects.count(), 0)
+        self.assertEqual(self.stored_photos(), [])
+        for description in ('', '   ', 'a' * 201):
+            response = self.photo_batch(descriptions=['Valida', description])
+            self.assertEqual(response.status_code, 400, response.data)
+            self.assertEqual(FotoCancha.objects.count(), 0)
+            self.assertEqual(self.stored_photos(), [])
+
+    def test_photo_batch_rejects_oversized_image_without_partial_save(self):
+        photo = self.photo()
+        oversized = SimpleUploadedFile('grande.png', photo.read() + b'0' * (5 * 1024 * 1024), content_type='image/png')
+        response = self.photo_batch(files=[self.photo(), oversized])
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn('5 MB', str(response.data))
+        self.assertEqual(FotoCancha.objects.count(), 0)
+        self.assertEqual(self.stored_photos(), [])
+
+    def test_photo_batch_rejects_bad_metadata_counts_and_publication(self):
+        for metadata in ('not json', '{}', '[]', '[1, 2]', '[{}]', 'null'):
+            response = self.photo_batch(fotografias=metadata)
+            self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(self.photo_batch(files=[], descriptions=[]).status_code, 400)
+        self.assertEqual(self.photo_batch(files=[self.photo() for _ in range(11)],
+                         descriptions=['Vista'] * 11).status_code, 400)
+        self.assertEqual(self.photo_batch(publicada='no valido').status_code, 400)
+        self.assertEqual(FotoCancha.objects.count(), 0)
+        self.assertEqual(self.stored_photos(), [])
+
+    def test_photo_batch_enforces_permission_branch_and_active_branch(self):
+        operator = User.objects.create_user('fotos@example.test', 'Testing-Password-123', sucursal=self.branch)
+        self.client.force_authenticate(operator)
+        self.assertEqual(self.photo_batch().status_code, 403)
+        role = Rol.objects.create(nombre='Carga de fotografias')
+        link = RolPermiso.objects.create(rol=role, permiso=Permiso.objects.get(nombre='canchas.crear'))
+        RolPermisoUsuario.objects.create(user=operator, rol_permiso=link)
+        foreign = Cancha.objects.create(sucursal=self.other, codigo='F', nombre='Otra cancha')
+        self.assertEqual(self.photo_batch(cancha=foreign.pk).status_code, 403)
+        self.branch.estado = False
+        self.branch.save(update_fields=['estado'])
+        self.assertEqual(self.photo_batch().status_code, 403)
+        self.client.force_authenticate(self.root)
+        self.assertEqual(self.photo_batch().status_code, 400)
+        self.assertEqual(FotoCancha.objects.count(), 0)
+        self.assertEqual(self.stored_photos(), [])
+
+    def test_photo_batch_failure_rolls_back_records_and_cleans_only_new_files(self):
+        self.post('fotos', {'cancha': self.court.pk, 'archivo': self.photo(), 'texto_alternativo': 'Anterior'}, 'multipart')
+        previous = self.stored_photos()
+        original_save = FotoCancha.save
+        def failing_save(photo, *args, **kwargs):
+            original_save(photo, *args, **kwargs)
+            if photo.texto_alternativo == 'Vista lateral':
+                raise RuntimeError('Fallo simulado despues de guardar el archivo')
+        with patch.object(FotoCancha, 'save', failing_save):
+            with self.assertRaises(RuntimeError):
+                self.photo_batch()
+        self.assertEqual(FotoCancha.objects.count(), 1)
+        self.assertEqual(self.stored_photos(), previous)
 
     def schedule(self, **changes):
         data = {'cancha':self.court.pk,'dia_semana':1,'apertura':'18:00','cierre':'22:00',
@@ -233,6 +335,22 @@ class CatalogTests(TestCase):
             self.assertEqual(row['horas_limite_cancelacion'], 12)
             self.assertEqual(row['minutos_retencion'], 20)
         self.assertEqual(self.patch('politicas', pk, {'horas_limite_cancelacion': -1}).status_code, 400)
+
+    def test_edit_and_publish_without_photo_returns_clear_error_and_rolls_back(self):
+        self.schedule()
+        self.rate()
+        self.post('politicas', {'sucursal': self.branch.pk})
+        original_name = self.court.nombre
+        response = self.patch('canchas', self.court.pk, {'nombre': 'Cancha actualizada', 'publicada': True})
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(response.data, {'publicada': ['Agrega al menos una fotografia publicada.']})
+        self.court.refresh_from_db()
+        self.assertEqual(self.court.nombre, original_name)
+        self.assertFalse(self.court.publicada)
+        saved = self.patch('canchas', self.court.pk, {'nombre': 'Cancha actualizada', 'publicada': False})
+        self.assertEqual(saved.status_code, 200, saved.data)
+        self.assertEqual(saved.data['nombre'], 'Cancha actualizada')
+        self.assertFalse(saved.data['publicada'])
 
     def test_publication_requires_complete_configuration(self):
         self.assertEqual(self.patch('canchas',self.court.pk,{'publicada':True}).status_code,400)

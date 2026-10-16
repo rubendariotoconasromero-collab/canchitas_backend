@@ -109,6 +109,7 @@ class HistorySerializer(serializers.ModelSerializer):
 
 
 class ReservaSerializer(serializers.ModelSerializer):
+    codigo_correlativo = serializers.CharField(read_only=True)
     detalle = DetailSerializer(read_only=True)
     historial = HistorySerializer(many=True, read_only=True)
     estado = serializers.SerializerMethodField()
@@ -116,7 +117,7 @@ class ReservaSerializer(serializers.ModelSerializer):
     saldo_pendiente = serializers.SerializerMethodField()
     class Meta:
         model = Reserva
-        fields = ['id', 'codigo', 'sucursal', 'cliente', 'cliente_snapshot', 'estado', 'origen', 'total', 'moneda',
+        fields = ['id', 'codigo', 'codigo_correlativo', 'sucursal', 'cliente', 'cliente_snapshot', 'estado', 'origen', 'total', 'moneda',
                   'retencion_hasta', 'horas_cancelacion', 'condiciones', 'notas', 'detalle', 'historial', 'total_pagado', 'saldo_pendiente']
 
     def get_estado(self, obj):

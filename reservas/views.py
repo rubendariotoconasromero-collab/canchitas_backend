@@ -191,7 +191,7 @@ class ReservaViewSet(ScopedView, viewsets.ReadOnlyModelViewSet):
     def cotizar_reprogramacion(self, request, pk=None):
         obj = services.lock_reservation(request.user, self.get_object().pk)
         if obj.estado != 'PENDIENTE' or obj.retencion_hasta <= timezone.now() or hasattr(obj, 'pago'):
-            raise ValidationError('Solo se reprograman retenciones vigentes sin pago.')
+            raise ValidationError('Solo se reprograman reservas pendientes de pago con plazo vigente.')
         serializer = MoveInput(data=request.data, context={'zona_horaria': obj.detalle.zona_horaria})
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data

@@ -22,12 +22,16 @@ from catalogo.branding import branding
 from users.dashboard import dashboard_summary
 
 urlpatterns = [
+    path('api/publico/', include('reservas.public_urls')),
     path('api/dashboard/resumen/', dashboard_summary, name='dashboard-summary'),
     path('api/publico/marca/', branding, name='public-branding'),
     path('api/publico/marca', branding, name='public-branding-noslash'),
     path('api/catalogo/', include('catalogo.urls')),
     path('api/reservas/', include('reservas.urls')),
     path('api/caja/', include('caja.urls')),
+    path('api/reportes/', include('reportes.urls')),
+    path('api/auditoria/', include('auditoria.urls')),
+    path('api/avisos/', include('reportes.notice_urls')),
     path('api/', include('users.urls')),
     path('admin/', admin.site.urls),
 ]

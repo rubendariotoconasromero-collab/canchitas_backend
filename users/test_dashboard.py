@@ -146,9 +146,12 @@ class DashboardTests(CashFixtures, TestCase):
         self.assertIsNotNone(response.data['caja'])
         self.assertIsNotNone(response.data['reservas'])
 
-    def test_receipt_access_is_scoped_to_branch(self):
+    def test_receipt_access_requires_ownership_and_branch(self):
         receipt = services.charge(self.user, self.payment())
-        self.operator('dashboard.ver', 'caja.ver', 'caja.abrir')
+        operator = self.operator('dashboard.ver', 'caja.ver', 'caja.abrir')
+        self.assertEqual(self.client.get(f'/api/caja/recibos/{receipt.pk}/').status_code, 404)
+        receipt.pago.registrado_por = operator
+        receipt.pago.save(update_fields=['registrado_por'])
         self.assertEqual(self.client.get(f'/api/caja/recibos/{receipt.pk}/').status_code, 200)
         self.reservation.sucursal = self.other
         self.reservation.save()

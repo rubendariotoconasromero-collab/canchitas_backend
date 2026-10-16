@@ -3,6 +3,7 @@ from pathlib import Path
 from decimal import Decimal
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
+from config.codigos import correlativo
 
 
 class Timestamped(models.Model):
@@ -21,6 +22,7 @@ class Negocio(Timestamped):
     correo_publico = models.EmailField(blank=True)
     logo_url = models.URLField(blank=True)
     portada_url = models.URLField(blank=True)
+    archivo = models.ImageField(upload_to='web/logos/', blank=True)
     sitio_web = models.URLField(blank=True)
     moneda = models.CharField(max_length=3, default='BOB', choices=[('BOB', 'Bolivianos')])
     publicado = models.BooleanField(default=False)
@@ -35,12 +37,19 @@ class Negocio(Timestamped):
 class Deporte(Timestamped):
     nombre = models.CharField(max_length=100, unique=True)
     activo = models.BooleanField(default=True)
+    descripcion_publica = models.TextField(blank=True)
+    archivo = models.ImageField(upload_to='web/deportes/', blank=True)
+    texto_alternativo = models.CharField(max_length=200, blank=True)
 
     class Meta:
         ordering = ['nombre']
 
 
 class Cancha(Timestamped):
+    @property
+    def codigo_correlativo(self):
+        return correlativo('CAN', self.pk)
+
     sucursal = models.ForeignKey('users.Sucursal', on_delete=models.PROTECT, related_name='canchas')
     codigo = models.CharField(max_length=30)
     nombre = models.CharField(max_length=120)
@@ -159,3 +168,74 @@ class RespaldoAnticipo(models.Model):
     sucursal_id = models.PositiveBigIntegerField(editable=False)
     version = models.PositiveIntegerField(editable=False)
     porcentaje_anticipo = models.DecimalField(max_digits=5, decimal_places=2, null=True, editable=False)
+
+
+class ConfiguracionWeb(Timestamped):
+    negocio = models.OneToOneField(Negocio, on_delete=models.PROTECT, related_name='web')
+    lema = models.CharField(max_length=150, blank=True)
+    descripcion_intro = models.CharField(max_length=500, blank=True)
+    horario_atencion = models.CharField(max_length=200, blank=True)
+    seo_titulo = models.CharField(max_length=160, blank=True)
+    seo_descripcion = models.CharField(max_length=320, blank=True)
+    mostrar_deportes = models.BooleanField(default=True)
+    mostrar_canchas = models.BooleanField(default=True)
+    mostrar_contacto = models.BooleanField(default=True)
+    publicada = models.BooleanField(default=False)
+
+
+def web_image_path(instance, filename):
+    return f'web/contenido/{uuid4().hex}{Path(filename).suffix.lower()}'
+
+
+class SlideWeb(Timestamped):
+    negocio = models.ForeignKey(Negocio, on_delete=models.PROTECT, related_name='slides_web')
+    titulo = models.CharField(max_length=150)
+    descripcion = models.CharField(max_length=400, blank=True)
+    archivo = models.ImageField(upload_to=web_image_path, blank=True)
+    texto_alternativo = models.CharField(max_length=200, blank=True)
+    texto_boton = models.CharField(max_length=50, default='Ver canchas')
+    destino = models.CharField(max_length=20, default='CANCHAS', choices=[('CANCHAS','Canchas'),('CONTACTO','Contacto'),('SEGUIMIENTO','Seguimiento')])
+    orden = models.PositiveIntegerField(default=0)
+    publicada = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['orden','pk']
+
+
+class SeccionWeb(Timestamped):
+    negocio = models.ForeignKey(Negocio, on_delete=models.PROTECT, related_name='secciones_web')
+    tipo = models.CharField(max_length=20, choices=[('NOSOTROS','Nosotros'),('INSTALACIONES','Instalaciones'),('SERVICIOS','Servicios')])
+    titulo = models.CharField(max_length=150)
+    contenido = models.TextField(blank=True)
+    archivo = models.ImageField(upload_to=web_image_path, blank=True)
+    texto_alternativo = models.CharField(max_length=200, blank=True)
+    orden = models.PositiveIntegerField(default=0)
+    publicada = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['orden','pk']
+        constraints = [models.UniqueConstraint(fields=['negocio','tipo'],name='seccion_web_tipo_unico')]
+
+
+class ContactoAdicional(Timestamped):
+    negocio = models.ForeignKey(Negocio, on_delete=models.PROTECT, related_name='contactos_web')
+    tipo = models.CharField(max_length=20, choices=[('TELEFONO','Telefono'),('WHATSAPP','WhatsApp'),('CORREO','Correo')])
+    etiqueta = models.CharField(max_length=80)
+    valor = models.CharField(max_length=254)
+    orden = models.PositiveIntegerField(default=0)
+    publicada = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['orden','pk']
+
+
+class RedSocial(Timestamped):
+    negocio = models.ForeignKey(Negocio, on_delete=models.PROTECT, related_name='redes_web')
+    plataforma = models.CharField(max_length=20, choices=[(x,x.title()) for x in ['FACEBOOK','INSTAGRAM','TIKTOK','YOUTUBE','X']])
+    url = models.URLField()
+    orden = models.PositiveIntegerField(default=0)
+    publicada = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['orden','pk']
+        constraints = [models.UniqueConstraint(fields=['negocio','plataforma'],name='red_web_plataforma_unica')]

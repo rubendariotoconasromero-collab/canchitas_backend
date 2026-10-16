@@ -10,6 +10,9 @@ PERMISSIONS = {
     'reservas.ver', 'reservas.crear', 'reservas.alquilar_inmediato', 'caja.cobrar',
 }
 PERMISSIONS.update({'caja.ver', 'caja.abrir', 'caja.cerrar', 'caja.movimientos','caja.configurar'})
+PERMISSIONS.update({'solicitudes.ver', 'solicitudes.aceptar', 'solicitudes.rechazar'})
+PERMISSIONS.update({'reportes.reservas', 'reportes.cobros', 'reportes.cierres',
+                    'reportes.ocupacion', 'reportes.exportar', 'auditoria.ver', 'avisos.ver'})
 LEGACY_READ = {
     'acceso_dashboard': 'dashboard.ver', 'acceso_usuarios': 'usuarios.ver',
     'acceso_roles': 'roles.ver', 'acceso_permisos': 'permisos.ver',
@@ -17,7 +20,7 @@ LEGACY_READ = {
 }
 
 PERMISSIONS.update(f'{resource}.{action}' for resource in
-                   ('negocio', 'sucursales', 'deportes', 'canchas', 'horarios', 'tarifas', 'politicas')
+                   ('negocio', 'sucursales', 'deportes', 'canchas', 'horarios', 'tarifas', 'politicas', 'contenido_web')
                    for action in ('ver', 'crear', 'editar', 'desactivar'))
 PERMISSIONS.update({'clientes.ver', 'clientes.crear', 'clientes.editar', 'clientes.desactivar',
                     'reservas.reprogramar', 'reservas.cancelar', 'reservas.confirmar',

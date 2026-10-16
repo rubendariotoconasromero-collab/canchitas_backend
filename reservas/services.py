@@ -63,7 +63,7 @@ def quote(link, start, end, immediate=False, exclude=None):
         raise ValidationError('La reserva debe comenzar en el futuro.')
     policy = PoliticaReserva.objects.filter(sucursal=court.sucursal, activa=True).order_by('-version').first()
     if not policy or not policy.minutos_retencion:
-        raise ValidationError('Configura una politica activa con tiempo de bloqueo temporal en minutos.')
+        raise ValidationError('Configura una politica activa con un plazo para completar el pago, en minutos.')
     zone = ZoneInfo(court.sucursal.zona_horaria)
     first, last = start.astimezone(zone).date() - timedelta(days=1), end.astimezone(zone).date()
     openings, rates = [], []
@@ -180,7 +180,7 @@ def transition(user, reservation_id, action, reason=''):
     state, now = reservation.estado, timezone.now()
     expired = state == Reserva.Estado.PENDIENTE and reservation.retencion_hasta <= now
     if expired:
-        raise Conflict('La retencion vencio. El horario ya no esta apartado.')
+        raise Conflict('El plazo de pago vencio. El horario ya no esta apartado.')
     if action == 'cancelar':
         if state not in [Reserva.Estado.PENDIENTE, Reserva.Estado.CONFIRMADA]:
             raise ValidationError('Esta reserva no se puede cancelar.')
@@ -216,7 +216,7 @@ def transition(user, reservation_id, action, reason=''):
 def reschedule(user, reservation_id, data):
     reservation = lock_reservation(user, reservation_id)
     if reservation.estado != Reserva.Estado.PENDIENTE or reservation.retencion_hasta <= timezone.now() or PagoReserva.objects.filter(reserva=reservation).exists():
-        raise ValidationError('Solo se reprograman retenciones vigentes sin pago.')
+        raise ValidationError('Solo se reprograman reservas pendientes de pago con plazo vigente.')
     detail = reservation.detalle
     quotation = quote(detail.cancha_deporte, data['inicio'], data['fin'], exclude=reservation.pk)
     if 'total_esperado' in data and data['total_esperado'] != quotation['total']:

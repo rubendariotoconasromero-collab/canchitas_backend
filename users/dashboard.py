@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from users.access import effective_permissions
 from users.models import Sucursal
 from reservas.models import Reserva
-from caja.models import Caja, SesionCaja, ReciboPago
+from caja.models import Caja, SesionCaja, ReciboPago, LineaPago
 from caja.services import summary
 
 
@@ -23,11 +23,11 @@ def money(value):
 
 def payment_totals(receipts):
     totals = receipts.aggregate(importe=Sum('pago__importe'), cantidad=Count('pk'))
+    by_medium = LineaPago.objects.filter(recibo_id__in=receipts.order_by().values('pk')).order_by().values(
+        'medio__nombre').annotate(importe=Sum('importe'), cantidad=Count('recibo_id', distinct=True)).order_by('medio__nombre')
     return {'importe': money(totals['importe']), 'cantidad': totals['cantidad'],
-            'por_medio': [{'medio': row['datos__medio'], 'importe': money(row['importe']),
-                          'cantidad': row['cantidad']}
-                         for row in receipts.order_by().values('datos__medio').annotate(
-                             importe=Sum('pago__importe'), cantidad=Count('pk')).order_by('datos__medio')]}
+            'por_medio': [{'medio': row['medio__nombre'], 'importe': money(row['importe']),
+                          'cantidad': row['cantidad']} for row in by_medium]}
 
 
 def reservation_rows(queryset):
@@ -105,7 +105,7 @@ def dashboard_summary(request):
                              'efectivo_esperado': summary(s)['esperado']}
                             for s in current.select_related('caja', 'responsable').prefetch_related('movimientos')],
                 'mis_cobros_turnos_abiertos': payment_totals(personal),
-                'ultimos_cobros': [{'id': r.pk, 'numero': f'SRM-{r.pk:08d}',
+                'ultimos_cobros': [{'id': r.pk, 'numero': r.codigo_correlativo,
                                     'fecha': r.created_at.isoformat(), 'cliente': r.datos.get('cliente', {}).get('nombre', 'Sin cliente registrado'),
                                     'cancha': r.datos.get('cancha', ''), 'medio': r.datos.get('medio', ''),
                                     'importe': money(r.pago.importe), 'operador': r.datos.get('operador', '')}

@@ -3,9 +3,11 @@ from rest_framework import serializers
 from users.models import Sucursal
 from .models import Negocio, Deporte, Cancha, CanchaDeporte, FotoCancha, HorarioCancha, TarifaCancha, PoliticaReserva
 from .rules import interval, overlaps, publication_errors
+from .images import validate_image
 
 
 class NegocioSerializer(serializers.ModelSerializer):
+    validate_archivo = staticmethod(validate_image)
     class Meta:
         model = Negocio
         fields = '__all__'
@@ -44,17 +46,27 @@ class SucursalCatalogoSerializer(serializers.ModelSerializer):
 
 
 class DeporteSerializer(serializers.ModelSerializer):
+    validate_archivo = staticmethod(validate_image)
     class Meta:
         model = Deporte
         fields = '__all__'
 
+    def validate(self, attrs):
+        image = attrs.get('archivo', self.instance.archivo if self.instance else None)
+        alt = attrs.get('texto_alternativo', self.instance.texto_alternativo if self.instance else '')
+        if image and not alt.strip(): raise serializers.ValidationError({'texto_alternativo':'Describe la imagen del deporte.'})
+        return attrs
+
 
 class CanchaSerializer(serializers.ModelSerializer):
+    codigo_correlativo = serializers.CharField(read_only=True)
     sucursal_nombre = serializers.CharField(source='sucursal.nombre', read_only=True)
     pendientes_publicacion = serializers.SerializerMethodField()
     area_m2 = serializers.DecimalField(max_digits=14, decimal_places=4, read_only=True, allow_null=True)
 
     def to_internal_value(self, data):
+        if 'codigo_correlativo' in data:
+            raise serializers.ValidationError({'codigo_correlativo': 'El codigo se genera automaticamente y no se puede modificar.'})
         if 'area_m2' in data:
             raise serializers.ValidationError({'area_m2': 'El area se calcula a partir del ancho y largo.'})
         return super().to_internal_value(data)
@@ -95,16 +107,7 @@ class FotoSerializer(serializers.ModelSerializer):
         read_only_fields = ['orden']
 
     def validate_archivo(self, value):
-        if value.size > 5 * 1024 * 1024:
-            raise serializers.ValidationError('La imagen no puede superar 5 MB.')
-        if value.image.format not in ('JPEG', 'PNG', 'WEBP'):
-            raise serializers.ValidationError('Usa JPEG, PNG o WebP.')
-        if value.image.width * value.image.height > 25_000_000:
-            raise serializers.ValidationError('La imagen supera 25 megapixeles.')
-        from pathlib import Path
-        suffix = {'JPEG': '.jpg', 'PNG': '.png', 'WEBP': '.webp'}[value.image.format]
-        value.name = Path(value.name).stem + suffix
-        return value
+        return validate_image(value)
 
 
 class IntervalSerializer(serializers.ModelSerializer):
