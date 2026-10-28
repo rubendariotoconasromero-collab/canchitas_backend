@@ -76,6 +76,9 @@ class ReciboPago(models.Model):
 class LineaPago(models.Model):
     recibo = models.ForeignKey(ReciboPago, on_delete=models.PROTECT, related_name='lineas')
     medio = models.ForeignKey(MedioPago, on_delete=models.PROTECT)
+    # Datos historicos: el catalogo de medios puede cambiar sin alterar cobros pasados.
+    medio_nombre = models.CharField(max_length=60, editable=False)
+    medio_efectivo = models.BooleanField(editable=False)
     movimiento = models.OneToOneField(MovimientoCaja, on_delete=models.PROTECT, related_name='linea_pago')
     importe = models.DecimalField(max_digits=12, decimal_places=2)
     recibido = models.DecimalField(max_digits=12, decimal_places=2)

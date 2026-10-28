@@ -23,12 +23,18 @@ class PopulationTests(TestCase):
         call_command('populate_business', branch_id=self.branch.pk, actor_id=self.actor.pk,
                      stdout=self.output, **options)
 
+    def run_with_credentials(self, **options):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'credentials.json'
+            self.run_command(credentials_file=str(path), **options)
+            return json.loads(path.read_text(encoding='utf-8'))
+
     def assert_no_operations(self):
         for model in (Cliente, Reserva, BloqueoCancha, PagoReserva, Caja, SesionCaja, MovimientoCaja, ReciboPago):
             self.assertEqual(model.objects.count(), 0, model.__name__)
 
     def test_repeatable_operational_population_and_role_scope(self):
-        self.run_command()
+        rows = self.run_with_credentials()
         self.assertEqual(Cancha.objects.count(), 2)
         self.assertEqual(HorarioCancha.objects.count(), 14)
         self.assertEqual(TarifaCancha.objects.count(), 56)
@@ -37,10 +43,13 @@ class PopulationTests(TestCase):
         self.assert_no_operations()
         for hour in HorarioCancha.objects.all():
             self.assertEqual((hour.apertura, hour.cierre), (time(8), time(23)))
+        self.assertEqual(len(rows), 3)
+        for row in rows:
+            self.assertGreaterEqual(len(row['password']), 12)
+            self.assertNotEqual(row['password'], 'password')
+            self.assertTrue(User.objects.get(correo=row['correo']).check_password(row['password']))
         cashier = User.objects.get(correo='cajero1@gmail.com')
         reception = User.objects.get(correo='recepcion@gmail.com')
-        self.assertTrue(cashier.check_password('password'))
-        self.assertTrue(reception.check_password('password'))
         self.assertIn('caja.abrir', effective_permissions(cashier))
         self.assertNotIn('caja.configurar', effective_permissions(cashier))
         self.assertNotIn('alcance.global', effective_permissions(reception))
@@ -61,15 +70,19 @@ class PopulationTests(TestCase):
 
     def test_reset_access_updates_existing_accounts_without_duplicates(self):
         old = User.objects.create_user('recepcion@soccerrealmadrid.com', 'old-password', nombre='Recepcion', sucursal=self.branch)
-        self.run_command(reset_access=True)
+        rows = self.run_with_credentials(reset_access=True)
         old.refresh_from_db()
         self.actor.refresh_from_db()
         self.assertEqual(old.correo, 'recepcion@gmail.com')
         self.assertEqual(old.username, old.correo)
-        self.assertTrue(old.check_password('password'))
+        self.assertTrue(old.check_password(self.password_of(rows, 'recepcion@gmail.com')))
         self.assertEqual(self.actor.correo, 'admin@gmail.com')
-        self.assertTrue(self.actor.check_password('password'))
+        self.assertTrue(self.actor.check_password(self.password_of(rows, 'admin@gmail.com')))
         self.assertEqual(User.objects.count(), 4)
+
+    @staticmethod
+    def password_of(rows, email):
+        return next(row['password'] for row in rows if row['correo'] == email)
 
     def test_reset_removes_old_data_and_preserves_admin_password(self):
         Cancha.objects.create(sucursal=self.branch, codigo='OLD', nombre='Anterior')

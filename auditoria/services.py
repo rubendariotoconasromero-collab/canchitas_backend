@@ -15,7 +15,7 @@ FIELDS = {
     'SesionCaja': ('caja_id', 'responsable_id', 'monto_inicial', 'cierre', 'efectivo_esperado', 'efectivo_contado', 'diferencia'),
     'MovimientoCaja': ('sesion_id', 'tipo', 'importe', 'efectivo'),
     'PagoReserva': ('reserva_id', 'importe', 'registrado_por_id'),
-    'LineaPago': ('recibo_id', 'medio_id', 'movimiento_id', 'importe', 'recibido', 'cambio', 'referencia_externa', 'verificado'),
+    'LineaPago': ('recibo_id', 'medio_id', 'medio_nombre', 'medio_efectivo', 'movimiento_id', 'importe', 'recibido', 'cambio', 'referencia_externa', 'verificado'),
 }
 
 

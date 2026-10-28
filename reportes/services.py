@@ -177,13 +177,13 @@ def build(user, kind, params):
         if 'medio' in selected:
             qs = qs.distinct()
         for receipt in bounded(qs.select_related('pago__reserva', 'pago__registrado_por',
-                'movimiento__sesion__responsable').prefetch_related('lineas__medio', 'lineas__movimiento__sesion__responsable').order_by('pago__created_at', 'pk')):
+                'movimiento__sesion__responsable').prefetch_related('lineas__movimiento__sesion__responsable').order_by('pago__created_at', 'pk')):
             p, data = receipt.pago, receipt.datos
             payment_lines = list(receipt.lineas.all())
             turn = payment_lines[0].movimiento.sesion
             by_medium = {}
             for line in payment_lines:
-                by_medium[line.medio.nombre] = by_medium.get(line.medio.nombre, Decimal(0)) + line.importe
+                by_medium[line.medio_nombre] = by_medium.get(line.medio_nombre, Decimal(0)) + line.importe
             medium_label = ' · '.join(f'{name}: Bs {money(amount)}' for name, amount in by_medium.items())
             row = {'id': receipt.pk, 'reserva': p.reserva_id, 'codigo': p.reserva.codigo_correlativo,
                 'codigo_tecnico': str(p.reserva.codigo), 'codigo_pago': p.codigo_correlativo, 'numero': receipt.codigo_correlativo,
@@ -193,7 +193,7 @@ def build(user, kind, params):
                 'operador': data.get('operador', p.registrado_por.nombre), 'responsable': turn.responsable.nombre,
                 'medio': medium_label, 'importe': money(p.importe), 'estado_reserva': state(p.reserva, now),
                 '_por_medio': by_medium,
-                '_efectivo': sum((line.importe for line in payment_lines if line.medio.efectivo), Decimal(0))}
+                '_efectivo': sum((line.importe for line in payment_lines if line.medio_efectivo), Decimal(0))}
             if not query or query in ' '.join(str(v) for v in row.values()).casefold():
                 rows.append(row)
         by_medium = {}

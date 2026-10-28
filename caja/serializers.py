@@ -51,13 +51,13 @@ class MovementSerializer(serializers.ModelSerializer):
     def get_medio(self, obj):
         line = getattr(obj, 'linea_pago', None)
         if line:
-            return line.medio.nombre
+            return line.medio_nombre
         return 'Efectivo'
 
 
 class PaymentLineSerializer(serializers.ModelSerializer):
-    medio_nombre = serializers.CharField(source='medio.nombre', read_only=True)
-    efectivo = serializers.BooleanField(source='medio.efectivo', read_only=True)
+    medio_nombre = serializers.CharField(read_only=True)
+    efectivo = serializers.BooleanField(source='medio_efectivo', read_only=True)
     sesion = serializers.IntegerField(source='movimiento.sesion_id', read_only=True)
 
     class Meta:

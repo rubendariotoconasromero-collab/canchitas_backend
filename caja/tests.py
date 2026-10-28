@@ -125,12 +125,16 @@ class CashTests(CashFixtures, TestCase):
     def test_receipt_snapshot_survives_business_edits(self):
         receipt = services.charge(self.user,self.payment())
         original = receipt.datos.copy()
+        line = receipt.lineas.get()
+        self.assertEqual((line.medio_nombre, line.medio_efectivo), ('Efectivo', True))
         self.court.nombre = 'Otro nombre'
         self.court.save()
         self.cash.nombre = 'Efectivo cambiado'
         self.cash.save()
         receipt.refresh_from_db()
+        line.refresh_from_db()
         self.assertEqual(receipt.datos,original)
+        self.assertEqual((line.medio_nombre, line.medio_efectivo), ('Efectivo', True))
         self.assertIn('Efectivo',services.summary(self.session)['cobros_por_medio'])
 
     def test_box_configuration_is_global_only(self):

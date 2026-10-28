@@ -45,6 +45,17 @@ class ReportsTests(CashFixtures, TestCase):
         self.assertEqual(result.data['results'][0]['estado_reserva'], 'CANCELADA')
         self.assertEqual(self.get('reservas', True).data['resumen']['por_estado']['CANCELADA'], '100.00')
 
+    def test_reports_keep_historical_medium_snapshot(self):
+        cash.charge(self.user, self.payment())
+        self.cash.nombre = 'Efectivo cambiado'
+        self.cash.efectivo = False
+        self.cash.save()
+        result = self.get('cobros')
+        self.assertEqual(result.status_code, 200, result.data)
+        self.assertEqual(result.data['results'][0]['medio'], 'Efectivo: Bs 100.00')
+        self.assertEqual(result.data['resumen']['por_medio'], {'Efectivo': '100.00'})
+        self.assertEqual(result.data['resumen']['efectivo'], '100.00')
+
     def test_expired_effective_state_does_not_mutate_reservation(self):
         Reserva.objects.filter(pk=self.reservation.pk).update(retencion_hasta=timezone.now()-timedelta(minutes=1))
         response = self.get('reservas', True, estado='EXPIRADA')

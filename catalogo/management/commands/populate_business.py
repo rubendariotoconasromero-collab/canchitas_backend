@@ -2,6 +2,7 @@ from collections import Counter
 from datetime import date, time
 from decimal import Decimal
 import json
+import secrets
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
@@ -47,7 +48,7 @@ class Command(BaseCommand):
         parser.add_argument('--branch-id', type=int)
         parser.add_argument('--actor-id', type=int)
         parser.add_argument('--dry-run', action='store_true')
-        parser.add_argument('--reset-access', action='store_true', help='Restablece los cuatro accesos iniciales a Gmail/password (solo desarrollo).')
+        parser.add_argument('--reset-access', action='store_true', help='Restablece los cuatro accesos iniciales con claves nuevas (solo desarrollo).')
         parser.add_argument('--reset', action='store_true', help='BORRA operaciones, canchas y usuarios no superadministradores.')
         parser.add_argument('--backup-file', help='Respaldo dumpdata previo obligatorio para --reset.')
         parser.add_argument('--credentials-file', help='Archivo privado NUEVO para claves generadas; no subir a Git.')
@@ -140,7 +141,7 @@ class Command(BaseCommand):
         for label, count in sorted(self.counts.items()):
             self.stdout.write(f'  {label}: {count}')
         if not options['dry_run'] and credentials and not credentials_file:
-            self.stdout.write('Credenciales nuevas (privadas; cambiar antes de produccion):')
+            self.stdout.write('Credenciales generadas (privadas; guardalas ahora y cambialas antes de produccion):')
             for account in credentials:
                 self.stdout.write(f"  {account['correo']}: {account['password']}")
         self.stdout.write('No se crean clientes, reservas, bloqueos, cobros, pagos, cajas ni turnos.')
@@ -179,15 +180,16 @@ class Command(BaseCommand):
     def reset_user_access(self, user, email, credentials):
         if User.objects.exclude(pk=user.pk).filter(correo=email).exists() or User.objects.exclude(pk=user.pk).filter(username=email).exists():
             raise CommandError(f'El correo {email} ya pertenece a otro usuario.')
+        password = secrets.token_urlsafe(12)
         user.correo = email
         user.username = email
-        user.set_password('password')
+        user.set_password(password)
         user.save(update_fields=['correo', 'username', 'password'])
-        credentials.append({'correo': email, 'password': 'password', 'nombre': user.nombre})
+        credentials.append({'correo': email, 'password': password, 'nombre': user.nombre})
         self.counts['accesos actualizados'] += 1
 
     def create_user(self, email, name, branch, credentials, superuser=False):
-        password = 'password'
+        password = secrets.token_urlsafe(12)
         user = User.objects.create_user(email, password, nombre=name, sucursal=branch,
             estado=True, is_active=True, is_staff=superuser, is_superuser=superuser)
         credentials.append({'correo': email, 'password': password, 'nombre': name})

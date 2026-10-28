@@ -39,8 +39,8 @@ def summary(session):
     for movement in session.movimientos.all():
         if movement.efectivo:
             expected += -movement.importe if movement.tipo == 'RETIRO' else movement.importe
-    for line in LineaPago.objects.filter(movimiento__sesion=session).select_related('medio'):
-        label = line.medio.nombre
+    for line in LineaPago.objects.filter(movimiento__sesion=session):
+        label = line.medio_nombre
         totals[label] = totals.get(label, Decimal('0')) + line.importe
     return {'esperado': str(expected), 'cobros_por_medio': {key: str(value) for key, value in totals.items()}}
 
@@ -202,7 +202,8 @@ def charge(user, data):
                        for line in lines],
         })
     for line, movement in zip(lines, movements):
-        detail = LineaPago.objects.create(recibo=receipt, medio=line['medio'], movimiento=movement,
+        detail = LineaPago.objects.create(recibo=receipt, medio=line['medio'], medio_nombre=line['medio'].nombre,
+            medio_efectivo=line['medio'].efectivo, movimiento=movement,
             importe=line['importe'], recibido=line['recibido'], cambio=line['cambio'],
             referencia_externa=line['referencia'], verificado=line['verificado'])
         audit.changed(user, detail, {}, 'registrar', reservation.sucursal_id)
