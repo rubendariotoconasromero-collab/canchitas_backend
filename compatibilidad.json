@@ -1,0 +1,7 @@
+{
+  "entrega": "srm-2026-10-instalacion-1",
+  "migraciones_requeridas": {
+    "caja": "0004_lineapago_medium_snapshot",
+    "reservas": "0006_reserva_no_asistio"
+  }
+}

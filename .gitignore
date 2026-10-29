@@ -1,1 +1,14 @@
 .backups/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+credentials*.json
+credenciales*.json
+media/
+staticfiles/
+*.sql
+*.sql.gz
