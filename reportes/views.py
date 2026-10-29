@@ -12,7 +12,7 @@ from catalogo.models import Cancha, Deporte
 from caja.models import Caja, MedioPago, SesionCaja
 from users.models import User
 from auditoria.services import record
-from .exports import COLUMNS, NUMERIC, HEADERS, safe_cell, make_xlsx, make_pdf
+from .exports import columns_for, NUMERIC, HEADERS, safe_cell, make_xlsx, make_pdf
 from .services import authorize, branches, branch_for, read_snapshot, build, paginate, TYPES
 
 
@@ -67,7 +67,7 @@ def export_meta(request, meta, file_format):
             name = model.objects.filter(pk=int(value), **scope).values_list(field, flat=True).first()
             selected_filters.append(f'{label}: {name or value}')
     states = {'PENDIENTE': 'Pendiente de pago', 'CONFIRMADA': 'Confirmada', 'EN_CURSO': 'En curso',
-              'FINALIZADA': 'Finalizada', 'CANCELADA': 'Cancelada'}
+              'FINALIZADA': 'Finalizada', 'NO_ASISTIO': 'Cliente no asistio', 'CANCELADA': 'Cancelada'}
     if request.query_params.get('estado'):
         value = request.query_params['estado']
         selected_filters.append('Estado: ' + states.get(value, value))
@@ -100,7 +100,7 @@ def export_response(request, kind, file_format):
     else:
         output = io.StringIO(newline='')
         writer = csv.writer(output)
-        columns = COLUMNS[kind]
+        columns = columns_for(kind, meta)
         writer.writerow([HEADERS[column] for column in columns])
         for row in rows:
             writer.writerow([row.get(column, '') if column in NUMERIC else safe_cell(row.get(column, '')) for column in columns])

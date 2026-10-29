@@ -24,11 +24,11 @@ COLUMNS = {
 
 NUMERIC = {'id', 'turno', 'total', 'horas', 'importe', 'monto_inicial', 'esperado', 'contado',
            'diferencia', 'reservas', 'horas_confirmadas', 'horas_pendientes', 'cobros_efectivo',
-           'cobros_electronicos', 'ingresos_manuales', 'retiros'}
+           'cobros_electronicos', 'ingresos_manuales', 'retiros', 'importe_medio'}
 INTEGER = {'id', 'turno', 'reservas'}
 DATES = {'inicio', 'fin', 'fecha', 'apertura', 'cierre'}
 MONEY = {'total', 'importe', 'monto_inicial', 'esperado', 'contado', 'diferencia',
-         'cobros_efectivo', 'cobros_electronicos', 'ingresos_manuales', 'retiros'}
+         'cobros_efectivo', 'cobros_electronicos', 'ingresos_manuales', 'retiros', 'importe_medio'}
 
 HEADERS = {
     'id': 'Registro', 'codigo': 'Código de reserva', 'inicio': 'Inicio del servicio', 'fin': 'Fin del servicio',
@@ -36,7 +36,7 @@ HEADERS = {
     'cliente': 'Cliente', 'estado': 'Estado actual', 'origen': 'Origen', 'total': 'Importe de reserva (Bs)',
     'horas': 'Horas en el período', 'fecha': 'Fecha de cobro', 'caja': 'Caja', 'turno': 'Turno',
     'operador': 'Cobrado por', 'responsable': 'Responsable del turno', 'medio': 'Medios y desglose',
-    'importe': 'Total cobrado (Bs)', 'estado_reserva': 'Estado actual de la reserva', 'apertura': 'Apertura del turno',
+    'importe': 'Total cobrado (Bs)', 'importe_medio': 'Medio seleccionado (Bs)', 'estado_reserva': 'Estado actual de la reserva', 'apertura': 'Apertura del turno',
     'cierre': 'Cierre del turno', 'cerrado_por': 'Cerrado por', 'monto_inicial': 'Fondo inicial (Bs)',
     'esperado': 'Efectivo esperado (Bs)', 'contado': 'Efectivo contado (Bs)', 'diferencia': 'Diferencia (Bs)',
     'reservas': 'Reservas', 'horas_confirmadas': 'Horas confirmadas', 'horas_pendientes': 'Horas pendientes de pago',
@@ -46,7 +46,7 @@ HEADERS = {
 
 SUMMARY_LABELS = {
     'reservas': 'Reservas', 'importe_reservas': 'Importe de reservas (Bs)', 'cobros': 'Cobros',
-    'cobrado': 'Total cobrado (Bs)', 'efectivo': 'Cobrado en efectivo (Bs)', 'turnos': 'Turnos cerrados',
+    'cobrado': 'Total cobrado (Bs)', 'medio_seleccionado': 'Cobrado por medio seleccionado (Bs)', 'efectivo': 'Cobrado en efectivo (Bs)', 'turnos': 'Turnos cerrados',
     'con_diferencia': 'Cierres con diferencia', 'esperado': 'Efectivo esperado (Bs)',
     'contado': 'Efectivo contado (Bs)', 'diferencia': 'Diferencia neta (Bs)',
     'horas_confirmadas': 'Horas confirmadas', 'horas_pendientes': 'Horas pendientes de pago',
@@ -55,7 +55,7 @@ SUMMARY_LABELS = {
 
 STATE_LABELS = {
     'PENDIENTE': 'Pendiente de pago', 'CONFIRMADA': 'Confirmada', 'EN_CURSO': 'En curso',
-    'FINALIZADA': 'Finalizada', 'CANCELADA': 'Cancelada', 'EXPIRADA': 'Plazo de pago vencido',
+    'FINALIZADA': 'Finalizada', 'NO_ASISTIO': 'Cliente no asistió', 'CANCELADA': 'Cancelada', 'EXPIRADA': 'Plazo de pago vencido',
 }
 
 ORIGIN_LABELS = {
@@ -71,6 +71,13 @@ TEXT = '203247'
 MUTED = '596B80'
 WHITE = 'FFFFFF'
 GRID = 'D9E2EC'
+
+
+def columns_for(kind, meta):
+    columns = list(COLUMNS[kind])
+    if kind == 'cobros' and meta.get('filtros', {}).get('medio'):
+        columns.insert(columns.index('importe') + 1, 'importe_medio')
+    return columns
 
 
 def safe_cell(value):
@@ -225,7 +232,7 @@ def make_xlsx(kind, rows, summary, meta):
     summary_sheet.page_setup.fitToWidth = 1
     summary_sheet.page_setup.fitToHeight = 0
 
-    columns = COLUMNS[kind]
+    columns = columns_for(kind, meta)
     last_column = len(columns)
     last_letter = get_column_letter(last_column)
     detail_sheet.sheet_view.showGridLines = False
@@ -304,7 +311,7 @@ def make_pdf(kind, rows, summary, meta):
     from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
     output = BytesIO()
-    columns = COLUMNS[kind]
+    columns = columns_for(kind, meta)
     zone = ZoneInfo(meta['zona_horaria'])
     page_size = landscape(A4) if len(columns) > 7 else A4
     title = REPORT_TITLES[kind]

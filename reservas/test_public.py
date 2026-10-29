@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from decimal import Decimal
 from threading import Barrier
+from unittest.mock import patch
 from uuid import uuid4
 from django.core.cache import cache
 from django.db import close_old_connections, connection
@@ -54,6 +55,42 @@ class PublicFixtures(Fixtures):
 
 
 class PublicReservationTests(PublicFixtures, TestCase):
+    def test_public_request_to_mixed_payment_service_close_and_report(self):
+        from caja.models import Caja, MedioPago
+        sent = self.send()
+        self.assertEqual(sent.status_code, 201, sent.data)
+        request = SolicitudReserva.objects.get()
+        accepted = self.accept(request)
+        self.assertEqual(accepted.status_code, 200, accepted.data)
+        reservation = accepted.data['reserva']['id']
+        box = Caja.objects.create(sucursal=self.branch, nombre='Punto de cobro')
+        opened = self.client.post(f'/api/caja/cajas/{box.pk}/abrir/', {'monto_inicial': '50.00'}, format='json')
+        self.assertEqual(opened.status_code, 201, opened.data)
+        cash, _ = MedioPago.objects.get_or_create(codigo='EFECTIVO', defaults={'nombre': 'Efectivo', 'efectivo': True})
+        qr, _ = MedioPago.objects.get_or_create(codigo='TRANSFERENCIA_QR', defaults={'nombre': 'Transferencia QR', 'efectivo': False})
+        cash.activo = qr.activo = True
+        cash.save(update_fields=['activo'])
+        qr.save(update_fields=['activo'])
+        payload = {'sesion': opened.data['id'], 'reserva': reservation, 'clave': str(uuid4()), 'importe': '100.00', 'pagos': [
+            {'medio': cash.pk, 'importe': '40.00', 'recibido': '40.00'},
+            {'medio': qr.pk, 'importe': '60.00', 'recibido': '60.00', 'referencia': 'INTEGRACION-QR', 'verificado': True},
+        ]}
+        paid = self.client.post('/api/caja/recibos/', payload, format='json')
+        self.assertEqual(paid.status_code, 201, paid.data)
+        self.assertEqual(self.track(sent).data['estado_reserva'], 'CONFIRMADA')
+        with patch('reservas.services.timezone.now', return_value=self.start):
+            started = self.client.post(f'/api/reservas/reservas/{reservation}/iniciar/', {}, format='json')
+            self.assertEqual(started.status_code, 200, started.data)
+            ended = self.client.post(f'/api/reservas/reservas/{reservation}/finalizar/', {}, format='json')
+            self.assertEqual(ended.status_code, 200, ended.data)
+        closed = self.client.post(f'/api/caja/sesiones/{opened.data["id"]}/cerrar/', {'efectivo_contado': '90.00'}, format='json')
+        self.assertEqual(closed.status_code, 200, closed.data)
+        day = timezone.localdate().isoformat()
+        report = self.client.get('/api/reportes/cobros/', {'sucursal': self.branch.pk, 'desde': day, 'hasta': day, 'medio': qr.pk})
+        self.assertEqual(report.status_code, 200, report.data)
+        self.assertEqual(report.data['resumen']['medio_seleccionado'], '60.00')
+        self.assertEqual(report.data['resumen']['cobrado'], '100.00')
+
     def test_public_catalog_excludes_unpublished_and_private_fields(self):
         response = self.public.get('/api/publico/canchas/')
         self.assertEqual(response.status_code, 200)

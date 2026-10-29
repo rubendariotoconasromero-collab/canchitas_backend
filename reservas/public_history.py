@@ -18,7 +18,7 @@ from .public_api import PublicView, WriteThrottle, TrackingInput, tracking_data
 GROUPS = {
     'pendientes': ['EN_REVISION', 'PENDIENTE_PAGO', 'ACEPTADA'],
     'confirmadas': ['CONFIRMADA', 'EN_CURSO'],
-    'historial': ['FINALIZADA', 'CANCELADA', 'RECHAZADA', 'VENCIDA', 'EXPIRADA'],
+    'historial': ['FINALIZADA', 'NO_ASISTIO', 'CANCELADA', 'RECHAZADA', 'VENCIDA', 'EXPIRADA'],
 }
 
 
@@ -162,7 +162,7 @@ class PublicHistory(HistoryView):
         size = positive_int(request.query_params, 'page_size', 25, 100)
         count = rows.count()
         page = min(positive_int(request.query_params, 'page', 1, 1000000), max(1, (count + size - 1) // size))
-        return Response({'count': count, 'page': page, 'page_size': size,
+        return Response({'count': count, 'page': page, 'page_size': size, 'acceso_hasta': self.owner.acceso_hasta,
             'results': [history_data(row) for row in rows[(page - 1) * size:page * size]], 'actualizado_at': timezone.now()})
 
     def delete(self, request):

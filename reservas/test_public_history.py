@@ -76,7 +76,7 @@ class PublicHistoryTests(PublicFixtures, TestCase):
         self.assertEqual(self.listing(grupo='pendientes').data['results'][0]['estado_publico'], 'PENDIENTE_PAGO')
         self.assertEqual(self.listing(grupo='confirmadas').data['count'], 0)
         for state, group in [('CONFIRMADA', 'confirmadas'), ('EN_CURSO', 'confirmadas'),
-                             ('FINALIZADA', 'historial'), ('CANCELADA', 'historial')]:
+                             ('FINALIZADA', 'historial'), ('NO_ASISTIO', 'historial'), ('CANCELADA', 'historial')]:
             Reserva.objects.filter(pk=row.reserva_id or SolicitudReserva.objects.get(pk=row.pk).reserva_id).update(estado=state)
             self.assertEqual(self.listing(grupo=group).data['results'][0]['estado_publico'], state)
             self.assertEqual(self.detail(response.data['codigo']).data['estado_publico'], state)

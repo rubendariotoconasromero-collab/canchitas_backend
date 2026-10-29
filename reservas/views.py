@@ -13,7 +13,7 @@ from users.access import ActionPermission, effective_permissions, is_global
 from users.models import Sucursal
 from catalogo.models import Cancha, CanchaDeporte
 from .models import Cliente, Reserva, BloqueoCancha
-from .serializers import ClienteSerializer, ReservaSerializer, BookingInput, MoveInput, ReasonInput, BlockInput, BlockSerializer
+from .serializers import ClienteSerializer, ReservaSerializer, BookingInput, MoveInput, ReasonInput, RegularizationInput, BlockInput, BlockSerializer
 from . import services
 
 
@@ -71,6 +71,7 @@ class ReservaViewSet(ScopedView, viewsets.ReadOnlyModelViewSet):
     action_permissions = {a: ('reservas.ver',) for a in ['list', 'retrieve', 'agenda', 'opciones']}
     action_permissions.update({a: (f'reservas.{p}',) for a, p in [('create', 'crear'), ('cotizar', 'crear'), ('cancelar', 'cancelar'), ('reprogramar', 'reprogramar'), ('confirmar', 'confirmar'), ('iniciar', 'iniciar'), ('finalizar', 'finalizar')]})
     action_permissions['cotizar_reprogramacion'] = ('reservas.reprogramar',)
+    action_permissions['regularizar'] = ('reservas.finalizar',)
 
     def get_queryset(self):
         return self.scoped(Reserva.objects.select_related('detalle__cancha_deporte__cancha', 'pago').prefetch_related('historial__actor'))
@@ -178,6 +179,14 @@ class ReservaViewSet(ScopedView, viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=['post'])
     def finalizar(self, request, pk=None):
         return self.change(request, 'finalizar')
+
+    @action(detail=True, methods=['post'])
+    def regularizar(self, request, pk=None):
+        obj = self.get_object()
+        serializer = RegularizationInput(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(self.get_serializer(services.regularize(request.user, obj.pk,
+            serializer.validated_data['resultado'], serializer.validated_data['motivo'])).data)
 
     @action(detail=True, methods=['post'])
     def reprogramar(self, request, pk=None):

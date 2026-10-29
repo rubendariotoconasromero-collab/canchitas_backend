@@ -29,7 +29,7 @@ def lock_court(user, court_id):
 
 
 def occupied(now):
-    return Q(reserva__estado__in=[Reserva.Estado.CONFIRMADA, Reserva.Estado.EN_CURSO, Reserva.Estado.FINALIZADA]) | Q(
+    return Q(reserva__estado__in=[Reserva.Estado.CONFIRMADA, Reserva.Estado.EN_CURSO, Reserva.Estado.FINALIZADA, Reserva.Estado.NO_ASISTIO]) | Q(
         reserva__estado=Reserva.Estado.PENDIENTE, reserva__retencion_hasta__gt=now)
 
 
@@ -209,6 +209,22 @@ def transition(user, reservation_id, action, reason=''):
     reservation.estado = target
     reservation.save(update_fields=['estado', 'updated_at'])
     audit(reservation, action.upper(), user, state, {'motivo': reason, 'sin_reembolso': action == 'cancelar'})
+    return reservation
+
+
+@transaction.atomic
+def regularize(user, reservation_id, result, reason):
+    reservation = lock_reservation(user, reservation_id)
+    if reservation.estado != Reserva.Estado.CONFIRMADA or not has_full_payment(reservation):
+        raise ValidationError('Solo se regularizan reservas confirmadas y pagadas.')
+    if reservation.detalle.fin > timezone.now():
+        raise ValidationError('El horario reservado aun no ha finalizado.')
+    if result not in (Reserva.Estado.FINALIZADA, Reserva.Estado.NO_ASISTIO) or not reason.strip():
+        raise ValidationError('Selecciona el resultado y registra un motivo.')
+    previous = reservation.estado
+    reservation.estado = result
+    reservation.save(update_fields=['estado', 'updated_at'])
+    audit(reservation, 'REGULARIZAR', user, previous, {'motivo': reason.strip(), 'resultado': result})
     return reservation
 
 

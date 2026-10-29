@@ -1,7 +1,10 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.contrib import admin
 from django.test import RequestFactory
 from unittest.mock import patch
+from datetime import timedelta
+from django.core.cache import cache
+from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework.authtoken.models import Token
 
@@ -201,3 +204,42 @@ class AccessTests(TestCase):
                                  {'permiso_ids': [new.pk]}, format='json')
         self.assertTrue(RolPermiso.objects.filter(pk=old.pk).exists())
         self.assertTrue(RolPermisoUsuario.objects.filter(user=self.target, rol_permiso=old).exists())
+
+
+@override_settings(LOGIN_MAX_FAILURES=2, LOGIN_FAILURE_WINDOW_SECONDS=900, AUTH_TOKEN_MAX_AGE_SECONDS=60)
+class LoginSecurityTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user('login@example.test', 'Testing-Password-123', nombre='Operador')
+        self.client = APIClient()
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_failed_attempts_are_limited_and_correct_login_clears_counter(self):
+        url = '/api/login/'
+        bad = {'correo': self.user.correo, 'password': 'incorrect'}
+        good = {'correo': self.user.correo, 'password': 'Testing-Password-123'}
+        self.assertEqual(self.client.post(url, bad).status_code, 400)
+        self.assertEqual(self.client.post(url, good).status_code, 200)
+        self.assertEqual(self.client.post(url, bad).status_code, 400)
+        self.assertEqual(self.client.post(url, bad).status_code, 400)
+        self.assertEqual(self.client.post(url, good).status_code, 429)
+
+    def test_expired_token_is_rejected_and_reissued_on_login(self):
+        token = Token.objects.create(user=self.user)
+        Token.objects.filter(pk=token.pk).update(created=timezone.now()-timedelta(seconds=61))
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + token.key)
+        self.assertEqual(self.client.get('/api/me/').status_code, 401)
+        self.client.credentials()
+        response = self.client.post('/api/login/', {'correo': self.user.correo, 'password': 'Testing-Password-123'})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(response.data['token'], token.key)
+
+    @override_settings(LOGIN_TRUST_PROXY=False)
+    def test_forwarded_header_does_not_bypass_limit_without_trusted_proxy(self):
+        bad = {'correo': self.user.correo, 'password': 'incorrect'}
+        for forwarded in ('192.0.2.1', '192.0.2.2'):
+            self.assertEqual(self.client.post('/api/login/', bad, HTTP_X_FORWARDED_FOR=forwarded).status_code, 400)
+        response = self.client.post('/api/login/', bad, HTTP_X_FORWARDED_FOR='192.0.2.3')
+        self.assertEqual(response.status_code, 429)

@@ -214,6 +214,39 @@ class ReservationTests(Fixtures, TestCase):
         with self.assertRaises(services.Conflict):
             services.retain(self.user, self.data())
 
+    def test_regularization_requires_payment_finished_interval_and_records_outcome(self):
+        reserve = services.retain(self.user, self.data())
+        PagoReserva.objects.create(reserva=reserve, referencia=uuid4(), importe=reserve.total, registrado_por=self.user)
+        services.transition(self.user, reserve.pk, 'confirmar')
+        with self.assertRaises(ValidationError):
+            services.regularize(self.user, reserve.pk, 'NO_ASISTIO', 'Confirmado por el personal')
+        with patch('reservas.services.timezone.now', return_value=self.end + timedelta(minutes=1)):
+            url = f'/api/reservas/reservas/{reserve.pk}/regularizar/'
+            self.assertEqual(self.client.post(url, {'resultado': 'NO_ASISTIO', 'motivo': ''}, format='json').status_code, 400)
+            response = self.client.post(url, {'resultado': 'NO_ASISTIO', 'motivo': 'Confirmado por el personal'}, format='json')
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual(response.data['estado'], 'NO_ASISTIO')
+            event = reserve.historial.last()
+            self.assertEqual((event.accion, event.actor_id, event.datos['motivo']), ('REGULARIZAR', self.user.pk, 'Confirmado por el personal'))
+            self.assertTrue(PagoReserva.objects.filter(reserva=reserve).exists())
+            self.assertEqual(self.client.post(url, {'resultado': 'FINALIZADA', 'motivo': 'otra'}, format='json').status_code, 400)
+
+    def test_regularization_as_completed_and_permission_denial(self):
+        reserve = services.retain(self.user, self.data())
+        PagoReserva.objects.create(reserva=reserve, referencia=uuid4(), importe=reserve.total, registrado_por=self.user)
+        services.transition(self.user, reserve.pk, 'confirmar')
+        url = f'/api/reservas/reservas/{reserve.pk}/regularizar/'
+        data = {'resultado': 'FINALIZADA', 'motivo': 'Servicio comprobado'}
+        with patch('reservas.services.timezone.now', return_value=self.end + timedelta(minutes=1)):
+            restricted = User.objects.create_user('limited@example.test', 'test', sucursal=self.branch)
+            self.client.force_authenticate(restricted)
+            self.assertEqual(self.client.post(url, data, format='json').status_code, 403)
+            self.client.force_authenticate(self.user)
+            response = self.client.post(url, data, format='json')
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual(response.data['estado'], 'FINALIZADA')
+            self.assertEqual(reserve.historial.last().datos['resultado'], 'FINALIZADA')
+
     def test_reschedule_and_blocks(self):
         reserve = services.retain(self.user, self.data())
         old_deadline = reserve.retencion_hasta

@@ -56,6 +56,34 @@ class ReportsTests(CashFixtures, TestCase):
         self.assertEqual(result.data['resumen']['por_medio'], {'Efectivo': '100.00'})
         self.assertEqual(result.data['resumen']['efectivo'], '100.00')
 
+    def test_mixed_payment_filter_shows_selected_medium_and_full_total(self):
+        self.qr.activo = True
+        self.qr.save(update_fields=['activo'])
+        data = self.payment()
+        for key in ('medio', 'recibido', 'referencia', 'verificado'):
+            data.pop(key)
+        data['pagos'] = [
+            {'medio': self.cash.pk, 'importe': Decimal('40'), 'recibido': Decimal('40'), 'referencia': '', 'verificado': False},
+            {'medio': self.qr.pk, 'importe': Decimal('60'), 'recibido': Decimal('60'), 'referencia': 'QR-MIXTO', 'verificado': True},
+        ]
+        cash.charge(self.user, data)
+        result = self.get('cobros', medio=self.qr.pk)
+        self.assertEqual(result.status_code, 200, result.data)
+        self.assertEqual(result.data['results'][0]['importe'], '100.00')
+        self.assertEqual(result.data['results'][0]['importe_medio'], '60.00')
+        self.assertEqual(result.data['resumen']['medio_seleccionado'], '60.00')
+        self.assertEqual(result.data['resumen']['efectivo'], '40.00')
+        csv_response = self.get('cobros/exportar', medio=self.qr.pk)
+        self.assertIn('Medio seleccionado (Bs)', csv_response.content.decode('utf-8-sig'))
+        xlsx = self.get('cobros/exportar/xlsx', medio=self.qr.pk)
+        self.assertEqual(xlsx.status_code, 200)
+        from openpyxl import load_workbook
+        workbook = load_workbook(io.BytesIO(xlsx.content), data_only=True)
+        self.assertIn('Medio seleccionado (Bs)', [cell.value for cell in workbook['Detalle'][6]])
+        pdf = self.get('cobros/exportar/pdf', medio=self.qr.pk)
+        self.assertEqual(pdf.status_code, 200)
+        self.assertTrue(pdf.content.startswith(b'%PDF'))
+
     def test_expired_effective_state_does_not_mutate_reservation(self):
         Reserva.objects.filter(pk=self.reservation.pk).update(retencion_hasta=timezone.now()-timedelta(minutes=1))
         response = self.get('reservas', True, estado='EXPIRADA')

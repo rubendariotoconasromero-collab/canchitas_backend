@@ -27,6 +27,7 @@ class Reserva(Timestamped):
         CONFIRMADA = 'CONFIRMADA', 'Confirmada'
         EN_CURSO = 'EN_CURSO', 'En curso'
         FINALIZADA = 'FINALIZADA', 'Finalizada'
+        NO_ASISTIO = 'NO_ASISTIO', 'Cliente no asistio'
         CANCELADA = 'CANCELADA', 'Cancelada'
         EXPIRADA = 'EXPIRADA', 'Expirada'
 

@@ -146,7 +146,7 @@ def build(user, kind, params):
             groups = {}
             for row in rows:
                 status = row['estado']
-                if status not in ('CONFIRMADA', 'EN_CURSO', 'FINALIZADA', 'PENDIENTE'):
+                if status not in ('CONFIRMADA', 'EN_CURSO', 'FINALIZADA', 'NO_ASISTIO', 'PENDIENTE'):
                     continue
                 key = (row['_court'], row['_sport'], row['cancha'], row['deporte'])
                 group = groups.setdefault(key, {'id': f'{key[0]}-{key[1]}-{len(groups)}', 'cancha': key[2],
@@ -194,6 +194,8 @@ def build(user, kind, params):
                 'medio': medium_label, 'importe': money(p.importe), 'estado_reserva': state(p.reserva, now),
                 '_por_medio': by_medium,
                 '_efectivo': sum((line.importe for line in payment_lines if line.medio_efectivo), Decimal(0))}
+            if 'medio' in selected:
+                row['importe_medio'] = money(sum((line.importe for line in payment_lines if line.medio_id == selected['medio']), Decimal(0)))
             if not query or query in ' '.join(str(v) for v in row.values()).casefold():
                 rows.append(row)
         by_medium = {}
@@ -203,6 +205,8 @@ def build(user, kind, params):
         summary = {'cobros': len(rows), 'cobrado': money(sum((Decimal(row['importe']) for row in rows), Decimal(0))),
                    'por_medio': {k: money(v) for k, v in by_medium.items()},
                    'efectivo': money(sum((r['_efectivo'] for r in rows), Decimal(0)))}
+        if 'medio' in selected:
+            summary['medio_seleccionado'] = money(sum((Decimal(r['importe_medio']) for r in rows), Decimal(0)))
         rows = [{key: value for key, value in row.items() if not key.startswith('_')} for row in rows]
     else:
         qs = SesionCaja.objects.filter(caja__sucursal=branch, cierre__gte=start, cierre__lt=end)
@@ -232,7 +236,7 @@ def build(user, kind, params):
         'filtros': {key: value for key, value in params.items() if key not in ('page', 'page_size')},
         'alcance': 'sucursal' if global_scope or kind in ('reservas', 'ocupacion') else 'propio',
         'criterio': {'reservas': 'Servicios que intersectan el periodo; importe completo y estado actual.',
-                    'cobros': 'Pagos registrados en el periodo, incluidos los de reservas canceladas. Sin reembolsos.',
+                    'cobros': 'Pagos registrados en el periodo, incluidos los de reservas canceladas. Sin reembolsos.' + (' El total incluye el cobro completo; el importe del medio seleccionado muestra solo su parte.' if 'medio' in selected else ''),
                     'cierres': 'Turnos cerrados en el periodo; importes de efectivo guardados al cerrar.',
                     'ocupacion': 'Horas contratadas dentro del periodo. No mide uso real ni porcentaje historico.'}[kind]}
 

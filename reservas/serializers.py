@@ -86,6 +86,11 @@ class ReasonInput(StrictSerializer):
     motivo = serializers.CharField(max_length=255)
 
 
+class RegularizationInput(StrictSerializer):
+    resultado = serializers.ChoiceField(choices=['FINALIZADA', 'NO_ASISTIO'])
+    motivo = serializers.CharField(max_length=255)
+
+
 class BlockInput(IntervalSerializer):
     cancha = serializers.PrimaryKeyRelatedField(queryset=Cancha.objects.select_related('sucursal'))
     motivo = serializers.CharField(max_length=255)

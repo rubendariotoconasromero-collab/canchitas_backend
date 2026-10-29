@@ -1,3 +1,7 @@
+import hashlib
+from datetime import timedelta
+from django.conf import settings
+from django.core.cache import cache
 from django.utils import timezone
 from django.db import transaction
 from rest_framework import status, viewsets
@@ -6,6 +10,7 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.throttling import BaseThrottle
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from .access import ActionPermission, assigned_permissions, effective_permissions, is_global
@@ -36,12 +41,36 @@ def health(request):
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def failure_key(self, request):
+        ident = (BaseThrottle().get_ident(request) if settings.LOGIN_TRUST_PROXY
+                 else request.META.get('REMOTE_ADDR')) or 'unknown'
+        return 'login_failures:' + hashlib.sha256(ident.encode()).hexdigest()
 
     def post(self, request):
+        key = self.failure_key(request)
+        if cache.get(key, 0) >= settings.LOGIN_MAX_FAILURES:
+            return Response({'detail': 'Demasiados intentos fallidos. Espera unos minutos e intenta nuevamente.'}, status=429)
         serializer = LoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            if not cache.add(key, 1, settings.LOGIN_FAILURE_WINDOW_SECONDS):
+                try:
+                    cache.incr(key)
+                except ValueError:
+                    cache.add(key, 1, settings.LOGIN_FAILURE_WINDOW_SECONDS)
+            raise ValidationError(serializer.errors)
+        cache.delete(key)
         user = serializer.validated_data['user']
-        token, _ = Token.objects.get_or_create(user=user)
+        with transaction.atomic():
+            locked = User.objects.select_for_update().get(pk=user.pk)
+            if not locked.is_active or not locked.estado or locked.password != user.password:
+                raise ValidationError({'correo': ['Las credenciales proporcionadas son incorrectas.']})
+            token, _ = Token.objects.get_or_create(user=locked)
+            if token.created + timedelta(seconds=settings.AUTH_TOKEN_MAX_AGE_SECONDS) <= timezone.now():
+                token.delete()
+                token = Token.objects.create(user=locked)
+            user = locked
         user_data = UserSerializer(user).data
         return Response({'token': token.key, 'user': user_data})
 
